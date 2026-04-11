@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-cloudflared
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+    app: agm-cloudflared
+spec:
+  # 2 replicas = 2 connectors to Cloudflare's edge, giving you HA with no single point of failure
+  replicas: {{ .Values.cloudflared.replicaCount }}
+  selector:
+    matchLabels:
+      app: agm-cloudflared
+  template:
+    metadata:
+      labels:
+        app: agm-cloudflared
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app: agm-cloudflared
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:latest
+          imagePullPolicy: Always
+          args:
+            - tunnel
+            - --no-autoupdate
+            - run
+            - --token
+            - $(TUNNEL_TOKEN)
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-cloudflared-secret
+                  key: tunnelToken
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-cloudflared-secret
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  tunnelToken: {{ .Values.cloudflared.tunnelToken | quote }}

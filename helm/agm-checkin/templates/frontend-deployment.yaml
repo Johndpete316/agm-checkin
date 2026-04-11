@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-frontend
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+    app: agm-frontend
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      app: agm-frontend
+  template:
+    metadata:
+      labels:
+        app: agm-frontend
+    spec:
+      {{- include "agm-checkin.spreadAffinity" "frontend" | nindent 6 }}
+      containers:
+        - name: frontend
+          image: {{ .Values.frontend.image }}:{{ .Values.frontend.tag }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10

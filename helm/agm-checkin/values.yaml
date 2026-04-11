@@ -1,0 +1,29 @@
+# Images are imported directly to k3s nodes — no registry needed.
+# imagePullPolicy: IfNotPresent means k8s uses the locally imported image.
+imagePullPolicy: IfNotPresent
+
+api:
+  replicaCount: 2
+  image: agm-api
+  tag: latest
+  allowedOrigin: "https://checkin.reduxit.net"
+
+frontend:
+  replicaCount: 2
+  image: agm-frontend
+  tag: latest
+
+postgres:
+  image: postgres:16-alpine
+  storageClass: local-path   # k3s default; handles the PVC on whichever node postgres lands on
+  storageSize: 5Gi
+  user: postgres
+  # Override this with --set postgres.password=... or a separate secrets values file
+  password: test
+  db: agm_db
+
+cloudflared:
+  replicaCount: 2
+  # Paste your tunnel token here or override with --set cloudflared.tunnelToken=...
+  # Get it from: Cloudflare Zero Trust → Networks → Tunnels → Create tunnel → Docker → copy token
+  tunnelToken: ""  # Do not put the real token here — use values.secret.yaml instead

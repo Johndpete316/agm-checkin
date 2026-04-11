@@ -1,0 +1,24 @@
+services:
+
+  db:
+    image: postgres
+    restart: always
+    shm_size: 128mb
+    tmpfs:
+      - /var/lib/postgresql
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: agm_db
+
+  pgadmin4:
+    image: dpage/pgadmin4:latest
+    restart: always
+    ports:
+      - 80:80
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=johndpete5316@outlook.com
+      - PGADMIN_DEFAULT_PASSWORD=test
+      - CHECK_EMAIL_DELIVERABILITY=False

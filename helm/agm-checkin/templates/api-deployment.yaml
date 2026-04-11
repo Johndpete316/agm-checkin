@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+    app: agm-api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      app: agm-api
+  template:
+    metadata:
+      labels:
+        app: agm-api
+    spec:
+      {{- include "agm-checkin.spreadAffinity" "api" | nindent 6 }}
+      containers:
+        - name: api
+          image: {{ .Values.api.image }}:{{ .Values.api.tag }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              value: "host={{ .Release.Name }}-postgres user={{ .Values.postgres.user }} password={{ .Values.postgres.password }} dbname={{ .Values.postgres.db }} port=5432 sslmode=disable"
+            - name: ALLOWED_ORIGIN
+              value: {{ .Values.api.allowedOrigin | quote }}
+          readinessProbe:
+            httpGet:
+              path: /api/competitors
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/competitors
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
