@@ -110,7 +110,7 @@ export default function CompetitorsPage() {
   return (
     <Box sx={{ mt: 4 }}>
       <Typography variant="h5" gutterBottom>
-        All Competitors
+        All Competitors - data is random, and meant to represent what could be....
       </Typography>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>

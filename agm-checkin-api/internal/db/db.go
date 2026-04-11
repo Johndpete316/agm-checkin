@@ -10,13 +10,14 @@ import (
 )
 
 type Competitor struct {
-	ID                string     `gorm:"primaryKey;type:uuid" json:"id"`
-	Name              string     `json:"name"`
-	Division          string     `json:"division"`
-	DateOfBirth       time.Time  `json:"dateOfBirth"`
-	RequiresValidation bool      `json:"requiresValidation"`
-	IsCheckedIn       bool       `json:"isCheckedIn"`
-	CheckInDateTime   *time.Time `json:"checkInDateTime"`
+	ID                 string     `gorm:"primaryKey;type:uuid" json:"id"`
+	Name               string     `json:"name"`
+	Division           string     `json:"division"`
+	DateOfBirth        time.Time  `json:"dateOfBirth"`
+	RequiresValidation bool       `json:"requiresValidation"`
+	Validated          bool       `json:"validated"`
+	IsCheckedIn        bool       `json:"isCheckedIn"`
+	CheckInDateTime    *time.Time `json:"checkInDateTime"`
 }
 
 func (c *Competitor) BeforeCreate(tx *gorm.DB) error {
