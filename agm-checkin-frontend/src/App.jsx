@@ -34,7 +34,7 @@ function AppLayout() {
       {token && <NavBar />}
       <Box
         component="main"
-        sx={token ? { pt: 3, px: 3, pb: 6 } : {}}
+        sx={token ? { pt: 3, px: { xs: 1.5, sm: 3 }, pb: 6 } : {}}
       >
         <Routes>
           <Route path="/login" element={<LoginPage />} />

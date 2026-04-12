@@ -19,6 +19,7 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogActions from '@mui/material/DialogActions'
 import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
+import Divider from '@mui/material/Divider'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import {
@@ -186,90 +187,153 @@ export default function CompetitorsPage() {
           <CircularProgress />
         </Box>
       ) : (
-        <TableContainer component={Paper} sx={{ borderRadius: 2 }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ '& th': { fontWeight: 600 } }}>
-                {columns.map(col => (
-                  <TableCell key={col.id}>
-                    <TableSortLabel
-                      active={orderBy === col.id}
-                      direction={orderBy === col.id ? order : 'asc'}
-                      onClick={() => handleSort(col.id)}
-                    >
-                      {col.label}
-                    </TableSortLabel>
-                  </TableCell>
-                ))}
-                <TableCell>Action</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {sorted.map(competitor => {
-                const age = calculateAge(competitor.dateOfBirth)
-                const dob = formatDOB(competitor.dateOfBirth)
-                return (
-                  <TableRow key={competitor.id} hover>
-                    <TableCell>
-                      {competitor.nameFirst} {competitor.nameLast}
-                    </TableCell>
-                    <TableCell>{competitor.studio || '—'}</TableCell>
-                    <TableCell>{competitor.teacher || '—'}</TableCell>
-                    <TableCell>{competitor.shirtSize || '—'}</TableCell>
-                    <TableCell>
-                      {age !== null ? (
-                        <Tooltip title={dob || ''}>
-                          <span>{age} yrs</span>
-                        </Tooltip>
-                      ) : (
-                        <Typography variant="body2" color="text.disabled">—</Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {competitor.requiresValidation ? (
-                        competitor.validated ? (
-                          <Tooltip title="Validated">
-                            <CheckCircleOutlineIcon fontSize="small" color="success" />
-                          </Tooltip>
-                        ) : (
-                          <Tooltip title="Requires validation">
-                            <WarningAmberIcon fontSize="small" color="warning" />
-                          </Tooltip>
-                        )
-                      ) : (
-                        <Typography variant="body2" color="text.disabled">—</Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
+        <>
+          {/* Mobile card list */}
+          <Box sx={{ display: { xs: 'flex', md: 'none' }, flexDirection: 'column', gap: 1.5 }}>
+            {sorted.map(competitor => {
+              const age = calculateAge(competitor.dateOfBirth)
+              const dob = formatDOB(competitor.dateOfBirth)
+              return (
+                <Paper key={competitor.id} variant="outlined" sx={{ borderRadius: 2, p: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="subtitle1" fontWeight={600} noWrap>
+                        {competitor.nameFirst} {competitor.nameLast}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" noWrap>
+                        {competitor.studio || '—'}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" noWrap>
+                        {competitor.teacher || '—'}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
                       <Chip
                         label={competitor.isCheckedIn ? 'Checked In' : 'Pending'}
                         color={competitor.isCheckedIn ? 'success' : 'default'}
                         size="small"
                       />
-                    </TableCell>
-                    <TableCell>
-                      {competitor.checkInDateTime
-                        ? new Date(competitor.checkInDateTime).toLocaleString()
-                        : '—'}
-                    </TableCell>
-                    <TableCell>
-                      {!competitor.isCheckedIn && (
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => handleCheckInClick(competitor)}
-                          disabled={checkingIn === competitor.id}
-                        >
-                          {checkingIn === competitor.id ? 'Checking in…' : 'Check In'}
-                        </Button>
+                      {competitor.requiresValidation && (
+                        competitor.validated ? (
+                          <Chip icon={<CheckCircleOutlineIcon />} label="Validated" color="success" size="small" variant="outlined" />
+                        ) : (
+                          <Chip icon={<WarningAmberIcon />} label="Validate" color="warning" size="small" variant="outlined" />
+                        )
                       )}
+                    </Box>
+                  </Box>
+                  <Divider sx={{ my: 1 }} />
+                  <Box sx={{ display: 'flex', gap: 2.5, flexWrap: 'wrap' }}>
+                    <Typography variant="body2" color="text.secondary">
+                      <strong>Age:</strong>{' '}
+                      {age !== null ? (
+                        <Tooltip title={dob || ''}><span>{age} yrs</span></Tooltip>
+                      ) : '—'}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      <strong>Shirt:</strong> {competitor.shirtSize || '—'}
+                    </Typography>
+                  </Box>
+                  {!competitor.isCheckedIn && (
+                    <Box sx={{ mt: 1.5 }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => handleCheckInClick(competitor)}
+                        disabled={checkingIn === competitor.id}
+                        fullWidth
+                      >
+                        {checkingIn === competitor.id ? 'Checking in…' : 'Check In'}
+                      </Button>
+                    </Box>
+                  )}
+                </Paper>
+              )
+            })}
+          </Box>
+
+          {/* Desktop table */}
+          <TableContainer component={Paper} sx={{ borderRadius: 2, display: { xs: 'none', md: 'block' } }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ '& th': { fontWeight: 600 } }}>
+                  {columns.map(col => (
+                    <TableCell key={col.id}>
+                      <TableSortLabel
+                        active={orderBy === col.id}
+                        direction={orderBy === col.id ? order : 'asc'}
+                        onClick={() => handleSort(col.id)}
+                      >
+                        {col.label}
+                      </TableSortLabel>
                     </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                  ))}
+                  <TableCell>Action</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {sorted.map(competitor => {
+                  const age = calculateAge(competitor.dateOfBirth)
+                  const dob = formatDOB(competitor.dateOfBirth)
+                  return (
+                    <TableRow key={competitor.id} hover>
+                      <TableCell>{competitor.nameFirst} {competitor.nameLast}</TableCell>
+                      <TableCell>{competitor.studio || '—'}</TableCell>
+                      <TableCell>{competitor.teacher || '—'}</TableCell>
+                      <TableCell>{competitor.shirtSize || '—'}</TableCell>
+                      <TableCell>
+                        {age !== null ? (
+                          <Tooltip title={dob || ''}><span>{age} yrs</span></Tooltip>
+                        ) : (
+                          <Typography variant="body2" color="text.disabled">—</Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {competitor.requiresValidation ? (
+                          competitor.validated ? (
+                            <Tooltip title="Validated">
+                              <CheckCircleOutlineIcon fontSize="small" color="success" />
+                            </Tooltip>
+                          ) : (
+                            <Tooltip title="Requires validation">
+                              <WarningAmberIcon fontSize="small" color="warning" />
+                            </Tooltip>
+                          )
+                        ) : (
+                          <Typography variant="body2" color="text.disabled">—</Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={competitor.isCheckedIn ? 'Checked In' : 'Pending'}
+                          color={competitor.isCheckedIn ? 'success' : 'default'}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {competitor.checkInDateTime
+                          ? new Date(competitor.checkInDateTime).toLocaleString()
+                          : '—'}
+                      </TableCell>
+                      <TableCell>
+                        {!competitor.isCheckedIn && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => handleCheckInClick(competitor)}
+                            disabled={checkingIn === competitor.id}
+                          >
+                            {checkingIn === competitor.id ? 'Checking in…' : 'Check In'}
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </>
       )}
 
       <Dialog

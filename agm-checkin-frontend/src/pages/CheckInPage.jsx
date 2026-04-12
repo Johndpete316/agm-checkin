@@ -30,8 +30,10 @@ export default function CheckInPage() {
   useEffect(() => {
     if (!search.trim()) {
       setCompetitors([])
+      setLoading(false)
       return
     }
+    setLoading(true)
     const timeout = setTimeout(() => {
       fetchCompetitors(search.trim())
     }, 300)

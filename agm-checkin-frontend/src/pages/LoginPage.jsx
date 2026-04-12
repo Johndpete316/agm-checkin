@@ -57,9 +57,10 @@ export default function LoginPage() {
         justifyContent: 'center',
         alignItems: 'center',
         minHeight: '100vh',
+        px: 2,
       }}
     >
-      <Paper elevation={3} sx={{ p: 4, width: 380, borderRadius: 3 }}>
+      <Paper elevation={3} sx={{ p: { xs: 3, sm: 4 }, width: '100%', maxWidth: 400, borderRadius: 3 }}>
         <Typography variant="h5" fontWeight={700} mb={0.5}>
           AGM Check-In
         </Typography>
