@@ -30,6 +30,13 @@ function calculateAge(dob) {
   return age
 }
 
+function formatDOB(dob) {
+  if (!dob) return null
+  const d = new Date(dob)
+  if (isNaN(d.getTime()) || d.getFullYear() < 1900) return null
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
 // Convert stored DOB to YYYY-MM-DD for the date input using UTC to avoid day-shift
 function toInputDate(dob) {
   if (!dob) return ''
@@ -49,6 +56,7 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
 
   const needsValidation = competitor.requiresValidation && !competitor.validated
   const age = calculateAge(competitor.dateOfBirth)
+  const dob = formatDOB(competitor.dateOfBirth)
   const fullName = `${competitor.nameFirst} ${competitor.nameLast}`
 
   const handleCheckInClick = () => {
@@ -84,11 +92,17 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
   return (
     <>
       <Card variant="outlined" sx={{ borderRadius: 2 }}>
-        <CardContent sx={{ pb: 0 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <CardContent sx={{ pb: 1 }}>
+          {/* Name + status row */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                <Typography variant="h6">{fullName}</Typography>
+                <Typography
+                  variant="h6"
+                  sx={{ fontSize: { xs: '1.2rem', sm: '1.25rem' }, lineHeight: 1.3 }}
+                >
+                  {fullName}
+                </Typography>
                 {needsValidation && !competitor.isCheckedIn && (
                   <Chip
                     icon={<WarningAmberIcon fontSize="small" />}
@@ -99,22 +113,6 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
                   />
                 )}
               </Box>
-              <Box sx={{ display: 'flex', gap: 3, mt: 0.75, flexWrap: 'wrap' }}>
-                <Typography variant="body2" color="text.secondary">
-                  <strong>Studio:</strong> {competitor.studio || '—'}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  <strong>Teacher:</strong> {competitor.teacher || '—'}
-                </Typography>
-              </Box>
-              <Box sx={{ display: 'flex', gap: 3, mt: 0.25, flexWrap: 'wrap' }}>
-                <Typography variant="body2" color="text.secondary">
-                  <strong>Age:</strong> {age !== null ? age : '—'}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  <strong>Shirt:</strong> {competitor.shirtSize || '—'}
-                </Typography>
-              </Box>
             </Box>
             <Chip
               label={competitor.isCheckedIn ? 'Checked In' : 'Pending'}
@@ -123,19 +121,83 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
               sx={{ mt: 0.5, ml: 1, flexShrink: 0 }}
             />
           </Box>
+
+          {/* Key fields — Age, DOB, Shirt */}
+          <Box
+            sx={{
+              display: 'flex',
+              gap: { xs: 2.5, sm: 3 },
+              flexWrap: 'wrap',
+              bgcolor: 'action.hover',
+              borderRadius: 1,
+              px: 1.5,
+              py: 1,
+              mb: 1.5,
+            }}
+          >
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
+                Age
+              </Typography>
+              <Typography
+                variant="body1"
+                fontWeight={700}
+                sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}
+              >
+                {age !== null ? `${age} yrs` : '—'}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
+                Date of Birth
+              </Typography>
+              <Typography
+                variant="body1"
+                fontWeight={700}
+                sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}
+              >
+                {dob || '—'}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
+                T-Shirt
+              </Typography>
+              <Typography
+                variant="body1"
+                fontWeight={700}
+                sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}
+              >
+                {competitor.shirtSize || '—'}
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* Secondary fields */}
+          <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+            <Typography variant="body2" color="text.secondary">
+              <strong>Studio:</strong> {competitor.studio || '—'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              <strong>Teacher:</strong> {competitor.teacher || '—'}
+            </Typography>
+          </Box>
+
           {competitor.isCheckedIn && competitor.checkInDateTime && (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
               Checked in at {new Date(competitor.checkInDateTime).toLocaleString()}
+              {competitor.checkedInBy && ` · ${competitor.checkedInBy}`}
             </Typography>
           )}
         </CardContent>
         {!competitor.isCheckedIn && (
-          <CardActions>
+          <CardActions sx={{ pt: 0, px: 2, pb: 2 }}>
             <Button
-              size="small"
               variant="contained"
+              size="large"
               onClick={handleCheckInClick}
               disabled={loading}
+              fullWidth
             >
               {loading ? 'Checking in…' : 'Check In'}
             </Button>

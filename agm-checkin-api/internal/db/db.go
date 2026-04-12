@@ -18,6 +18,7 @@ type Competitor struct {
 	Validated           bool       `json:"validated"`
 	IsCheckedIn         bool       `json:"isCheckedIn"`
 	CheckInDateTime     *time.Time `json:"checkInDateTime"`
+	CheckedInBy         string     `json:"checkedInBy"`
 	ShirtSize           string     `json:"shirtSize"`
 	Email               string     `json:"email"`
 	Teacher             string     `json:"teacher"`

@@ -163,7 +163,11 @@ func createCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 func checkInCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		competitor, err := svc.CheckIn(id)
+		staffName := ""
+		if staff := authmw.StaffFromContext(r.Context()); staff != nil {
+			staffName = staff.FirstName + " " + staff.LastName
+		}
+		competitor, err := svc.CheckIn(id, staffName)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return

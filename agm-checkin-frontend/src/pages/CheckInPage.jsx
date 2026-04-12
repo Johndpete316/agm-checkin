@@ -69,6 +69,7 @@ export default function CheckInPage() {
         onChange={e => setSearch(e.target.value)}
         sx={{ mb: 3 }}
         autoFocus
+        slotProps={{ input: { sx: { fontSize: { xs: '1.15rem', sm: '1rem' } } } }}
       />
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>

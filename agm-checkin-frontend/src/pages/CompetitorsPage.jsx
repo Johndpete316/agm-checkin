@@ -35,7 +35,8 @@ const columns = [
   { id: 'studio', label: 'Studio' },
   { id: 'teacher', label: 'Teacher' },
   { id: 'shirtSize', label: 'Shirt' },
-  { id: 'dateOfBirth', label: 'Age / DOB' },
+  { id: 'dateOfBirth', label: 'Birthday' },
+  { id: 'dateOfBirth', label: 'Age' },
   { id: 'validated', label: 'Validated' },
   { id: 'isCheckedIn', label: 'Status' },
   { id: 'checkInDateTime', label: 'Check-In Time' },
@@ -223,16 +224,19 @@ export default function CompetitorsPage() {
                     </Box>
                   </Box>
                   <Divider sx={{ my: 1 }} />
-                  <Box sx={{ display: 'flex', gap: 2.5, flexWrap: 'wrap' }}>
-                    <Typography variant="body2" color="text.secondary">
-                      <strong>Age:</strong>{' '}
-                      {age !== null ? (
-                        <Tooltip title={dob || ''}><span>{age} yrs</span></Tooltip>
-                      ) : '—'}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      <strong>Shirt:</strong> {competitor.shirtSize || '—'}
-                    </Typography>
+                  <Box sx={{ display: 'flex', gap: 2.5, flexWrap: 'wrap', mb: 0.5 }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Age</Typography>
+                      <Typography variant="body1" fontWeight={700}>{age !== null ? `${age} yrs` : '—'}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Date of Birth</Typography>
+                      <Typography variant="body1" fontWeight={700}>{dob || '—'}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>T-Shirt</Typography>
+                      <Typography variant="body1" fontWeight={700}>{competitor.shirtSize || '—'}</Typography>
+                    </Box>
                   </Box>
                   {!competitor.isCheckedIn && (
                     <Box sx={{ mt: 1.5 }}>
@@ -254,7 +258,7 @@ export default function CompetitorsPage() {
 
           {/* Desktop table */}
           <TableContainer component={Paper} sx={{ borderRadius: 2, display: { xs: 'none', md: 'block' } }}>
-            <Table size="small">
+            <Table>
               <TableHead>
                 <TableRow sx={{ '& th': { fontWeight: 600 } }}>
                   {columns.map(col => (
@@ -281,13 +285,8 @@ export default function CompetitorsPage() {
                       <TableCell>{competitor.studio || '—'}</TableCell>
                       <TableCell>{competitor.teacher || '—'}</TableCell>
                       <TableCell>{competitor.shirtSize || '—'}</TableCell>
-                      <TableCell>
-                        {age !== null ? (
-                          <Tooltip title={dob || ''}><span>{age} yrs</span></Tooltip>
-                        ) : (
-                          <Typography variant="body2" color="text.disabled">—</Typography>
-                        )}
-                      </TableCell>
+                      <TableCell>{dob || '—'}</TableCell>
+                      <TableCell>{age !== null ? `${age} yrs` : '—'}</TableCell>
                       <TableCell>
                         {competitor.requiresValidation ? (
                           competitor.validated ? (
@@ -311,9 +310,16 @@ export default function CompetitorsPage() {
                         />
                       </TableCell>
                       <TableCell>
-                        {competitor.checkInDateTime
-                          ? new Date(competitor.checkInDateTime).toLocaleString()
-                          : '—'}
+                        {competitor.checkInDateTime ? (
+                          <>
+                            {new Date(competitor.checkInDateTime).toLocaleString()}
+                            {competitor.checkedInBy && (
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                {competitor.checkedInBy}
+                              </Typography>
+                            )}
+                          </>
+                        ) : '—'}
                       </TableCell>
                       <TableCell>
                         {!competitor.isCheckedIn && (

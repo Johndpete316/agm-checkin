@@ -40,7 +40,7 @@ func (s *CompetitorService) Create(competitor *db.Competitor) error {
 	return s.db.Create(competitor).Error
 }
 
-func (s *CompetitorService) CheckIn(id string) (*db.Competitor, error) {
+func (s *CompetitorService) CheckIn(id string, staffName string) (*db.Competitor, error) {
 	var competitor db.Competitor
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.First(&competitor, "id = ?", id).Error; err != nil {
@@ -49,6 +49,7 @@ func (s *CompetitorService) CheckIn(id string) (*db.Competitor, error) {
 		now := time.Now()
 		competitor.IsCheckedIn = true
 		competitor.CheckInDateTime = &now
+		competitor.CheckedInBy = staffName
 		return tx.Save(&competitor).Error
 	})
 	return &competitor, err
