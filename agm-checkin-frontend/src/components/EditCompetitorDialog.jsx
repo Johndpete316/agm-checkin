@@ -47,6 +47,7 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
       lastRegisteredEvent: competitor.lastRegisteredEvent ?? '',
       requiresValidation: competitor.requiresValidation ?? false,
       validated: competitor.validated ?? false,
+      note: competitor.note ?? '',
     })
     setError('')
   }, [competitor])
@@ -71,6 +72,7 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
         lastRegisteredEvent: form.lastRegisteredEvent,
         requiresValidation: form.requiresValidation,
         validated: form.validated,
+        note: form.note,
       }
       const updated = await updateCompetitor(competitor.id, payload)
       onSaved(updated)
@@ -159,6 +161,16 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
               </Select>
             </FormControl>
           </Box>
+
+          <TextField
+            label="Note"
+            value={form.note ?? ''}
+            onChange={e => set('note', e.target.value)}
+            fullWidth
+            multiline
+            minRows={2}
+            placeholder="Internal staff note (visible to all staff)"
+          />
 
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
             <FormControlLabel

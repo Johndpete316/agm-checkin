@@ -21,6 +21,7 @@ type Competitor struct {
 	Teacher             string    `json:"teacher"`
 	Studio              string    `json:"studio"`
 	LastRegisteredEvent string    `json:"lastRegisteredEvent"`
+	Note                string    `json:"note"`
 }
 
 // Event represents a competition event (e.g. "glr-2026").

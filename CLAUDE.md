@@ -82,7 +82,7 @@ Endpoints marked **Admin** additionally require `RequireAdmin` middleware (role 
 | GET | `/api/competitors` | Required | List competitors; `?search=` for name search; registration users only see competitors registered for the current event |
 | GET | `/api/competitors/{id}` | Required | Get single competitor with current-event check-in record |
 | POST | `/api/competitors` | Required | Create competitor |
-| PATCH | `/api/competitors/{id}` | Admin | Update all competitor fields |
+| PATCH | `/api/competitors/{id}` | Admin | Update all competitor fields (including `note`) |
 | PATCH | `/api/competitors/{id}/checkin` | Required | Mark checked in for current event; auto-updates `lastRegisteredEvent` |
 | PATCH | `/api/competitors/{id}/dob` | Required | Update date of birth `{"dateOfBirth": "2005-03-15T00:00:00Z"}` |
 | PATCH | `/api/competitors/{id}/validate` | Required | Mark competitor as validated (`validated = true`) |
@@ -112,6 +112,7 @@ type Competitor struct {
     Teacher             string
     Studio              string
     LastRegisteredEvent string    // event ID slug of the most recent event this competitor registered for
+    Note                string    // free-form internal staff note; visible to all roles, editable by admins only via PATCH /api/competitors/{id}
 }
 
 // Check-in state lives in CompetitorEvent, not on Competitor directly.

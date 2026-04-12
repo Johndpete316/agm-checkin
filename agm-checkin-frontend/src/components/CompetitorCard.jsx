@@ -185,6 +185,12 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
             )}
           </Box>
 
+          {competitor.note && (
+            <Alert severity="info" sx={{ mt: 1.5, py: 0.5 }}>
+              {competitor.note}
+            </Alert>
+          )}
+
           {isCheckedIn && competitor.currentCheckIn?.checkInDatetime && (
             <>
               <Divider sx={{ my: 1 }} />
