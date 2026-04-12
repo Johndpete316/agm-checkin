@@ -31,7 +31,18 @@ for node in $NODES
 end
 
 echo ""
-echo "Done. Images are available on all nodes."
-echo "Deploy with:"
-echo "  helm upgrade --install agm-checkin ../helm/agm-checkin \\"
-echo "    -f ../helm/agm-checkin/values.secret.yaml"
+echo "==> Deploying via Helm..."
+helm upgrade --install agm-checkin ../helm/agm-checkin \
+    -f ../helm/agm-checkin/values.secret.yaml
+or begin; echo "Helm upgrade failed"; exit 1; end
+
+echo ""
+echo "==> Restarting deployments to pick up new images..."
+kubectl rollout restart deployment/agm-checkin-api
+kubectl rollout restart deployment/agm-checkin-frontend
+
+kubectl rollout status deployment/agm-checkin-api --timeout=120s
+kubectl rollout status deployment/agm-checkin-frontend --timeout=120s
+
+echo ""
+echo "Done. All pods are running the new images."

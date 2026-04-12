@@ -10,10 +10,21 @@ A competition check-in tool for registration staff. Built to be lightweight, int
 
 ## What it does
 
+- Staff authenticate with a shared access code and register their name — all activity is tied to the logged-in staff member
 - Search competitors by name and check them in
-- Flag competitors that require age/identity validation before check-in
-- View all competitors in a sortable table
+- Flag competitors that require age/identity validation; staff review and correct date of birth before check-in
+- Full audit trail — every check-in records which staff member performed it
+- View all competitors in a sortable table (desktop) or card list (mobile)
 - Stats dashboard showing check-in progress and check-ins by day
+- Responsive — works on phones at the check-in desk
+
+## Competitor data
+
+Each competitor record includes: name, date of birth, shirt size, email, teacher, studio, and last registered event. The validation flag (`requiresValidation`) is used to enforce identity checks for minors before check-in is allowed.
+
+## Auth
+
+Access is gated by a shared access code distributed to staff out-of-band. Three failed attempts from any IP permanently blocks that IP. Tokens do not expire automatically and are revoked manually via the database after the event.
 
 ## Deployment
 

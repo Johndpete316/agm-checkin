@@ -85,9 +85,10 @@ cloudflared:
   tunnelToken: <your tunnel token>
 
 api:
-  authPin: <your 4-digit PIN>
+  authPin: <staff access code>
 ```
 
+`authPin` is the access code staff enter at login. Distribute it out-of-band (verbally).
 To get a new tunnel token: Cloudflare Zero Trust → Networks → Tunnels → your tunnel → Configure → token.
 
 ---
@@ -118,17 +119,15 @@ Cloudflare's edge. If one pod dies, traffic automatically flows through the othe
 ### First deploy
 
 ```fish
-# 1. Build images and push to all nodes
+# 1. Build images, push to all nodes, run Helm upgrade, and rolling restart
 cd scripts
 ./push-images.fish
 
-# 2. Install via Helm (from repo root)
-helm upgrade --install agm-checkin ./helm/agm-checkin \
-  -f ./helm/agm-checkin/values.secret.yaml
-
-# 3. Confirm everything is running
+# 2. Confirm everything is running
 kubectl get pods
 ```
+
+`push-images.fish` handles the full cycle: build → import to containerd on each node → `helm upgrade --install` → `kubectl rollout restart` → waits for rollout to complete.
 
 Expected output — all pods `Running`:
 ```
@@ -141,49 +140,42 @@ agm-checkin-cloudflared-xxxxx  1/1     Running
 agm-checkin-cloudflared-xxxxx  1/1     Running
 ```
 
-### Seed the database
+### Seed the database (dev only)
 
 ```fish
 cd agm-checkin-api
 ./seed.fish
 ```
 
+### Restore production data from a dump
+
+```fish
+# Export from local postgres:
+pg_dump -U postgres -d agm_db --no-owner --no-privileges -f dump.sql
+
+# Restore to production (drops and recreates agm_db, scales API down/up):
+cd scripts
+./restore-db.fish ../dump.sql
+```
+
+This wipes all existing data including staff tokens. Staff will need to sign in again after a restore.
+
 ---
 
 ## Updating the application
 
-### Code change to the API
+For any code change — API or frontend — just run:
 
 ```fish
-# Rebuild and push API image only
-docker build -t agm-api:latest ./agm-checkin-api
-for node in ubuntu@k8s-worker-1 ubuntu@k8s-worker-2 ubuntu@k8s-worker-3
-    docker save agm-api:latest | gzip | ssh $node "sudo k3s ctr images import -"
-end
-
-# Rolling restart (pulls the new image already on the nodes)
-kubectl rollout restart deployment/agm-checkin-api
+cd scripts
+./push-images.fish
 ```
 
-### Code change to the frontend
+The script builds both images, imports them to all nodes, runs `helm upgrade`, performs a rolling restart of both deployments, and waits for rollout completion.
+
+### Helm values change only (e.g. scaling replicas)
 
 ```fish
-docker build \
-  --build-arg VITE_API_URL=https://api.checkin.reduxit.net \
-  -t agm-frontend:latest \
-  ./agm-checkin-frontend
-
-for node in ubuntu@k8s-worker-1 ubuntu@k8s-worker-2 ubuntu@k8s-worker-3
-    docker save agm-frontend:latest | gzip | ssh $node "sudo k3s ctr images import -"
-end
-
-kubectl rollout restart deployment/agm-checkin-frontend
-```
-
-### Helm values change (e.g. scaling replicas)
-
-```fish
-# Edit values.yaml, then:
 helm upgrade agm-checkin ./helm/agm-checkin \
   -f ./helm/agm-checkin/values.secret.yaml
 ```
