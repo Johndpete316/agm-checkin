@@ -8,6 +8,7 @@ import TableContainer from '@mui/material/TableContainer'
 import TableHead from '@mui/material/TableHead'
 import TableRow from '@mui/material/TableRow'
 import Paper from '@mui/material/Paper'
+import Chip from '@mui/material/Chip'
 import Select from '@mui/material/Select'
 import MenuItem from '@mui/material/MenuItem'
 import IconButton from '@mui/material/IconButton'
@@ -25,7 +26,8 @@ import { useAuth } from '../context/AuthContext'
 import { listStaff, updateStaffRole, revokeStaff } from '../api/staff'
 
 export default function ManageUsersPage() {
-  const { token } = useAuth()
+  const { token, staff: currentStaff } = useAuth()
+  const isSelf = (s) => s.firstName === currentStaff?.firstName && s.lastName === currentStaff?.lastName
   const [staff, setStaff] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -103,7 +105,10 @@ export default function ManageUsersPage() {
                 ))
               : staff.map(s => (
                   <TableRow key={s.id} hover>
-                    <TableCell>{s.firstName} {s.lastName}</TableCell>
+                    <TableCell>
+                      {s.firstName} {s.lastName}
+                      {isSelf(s) && <Chip label="you" size="small" sx={{ ml: 1 }} />}
+                    </TableCell>
                     <TableCell>
                       <Select
                         value={s.role}
@@ -119,14 +124,17 @@ export default function ManageUsersPage() {
                       {new Date(s.createdAt).toLocaleDateString()}
                     </TableCell>
                     <TableCell align="right">
-                      <Tooltip title="Revoke access">
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => setRevokeTarget(s)}
-                        >
-                          <BlockIcon fontSize="small" />
-                        </IconButton>
+                      <Tooltip title={isSelf(s) ? 'Cannot revoke your own access' : 'Revoke access'}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            disabled={isSelf(s)}
+                            onClick={() => setRevokeTarget(s)}
+                          >
+                            <BlockIcon fontSize="small" />
+                          </IconButton>
+                        </span>
                       </Tooltip>
                     </TableCell>
                   </TableRow>
