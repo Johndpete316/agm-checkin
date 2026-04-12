@@ -32,6 +32,7 @@ import {
 } from '../api/competitors'
 import { useAuth } from '../context/AuthContext'
 import EditCompetitorDialog from '../components/EditCompetitorDialog'
+import AddCompetitorDialog from '../components/AddCompetitorDialog'
 
 // Sortable columns — id must match the JSON field name from the API
 const columns = [
@@ -106,6 +107,7 @@ export default function CompetitorsPage() {
   const [confirming, setConfirming] = useState(false)
   const [dialogError, setDialogError] = useState('')
   const [editTarget, setEditTarget] = useState(null)
+  const [addOpen, setAddOpen] = useState(false)
 
   const fetchCompetitors = useCallback(async () => {
     setLoading(true)
@@ -184,9 +186,14 @@ export default function CompetitorsPage() {
 
   return (
     <Box sx={{ mt: 4 }}>
-      <Typography variant="h5" gutterBottom>
-        All Competitors
-      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5">All Competitors</Typography>
+        {isAdmin && (
+          <Button variant="contained" onClick={() => setAddOpen(true)}>
+            Add Competitor
+          </Button>
+        )}
+      </Box>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
@@ -375,6 +382,15 @@ export default function CompetitorsPage() {
           </TableContainer>
         </>
       )}
+
+      <AddCompetitorDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onCreated={created => {
+          setCompetitors(prev => [{ ...created, currentCheckIn: null }, ...prev])
+          setAddOpen(false)
+        }}
+      />
 
       <EditCompetitorDialog
         competitor={editTarget}

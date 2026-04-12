@@ -22,6 +22,14 @@ func NewStaffService(database *gorm.DB) *StaffService {
 	return &StaffService{db: database}
 }
 
+func (s *StaffService) GetByID(id string) (*db.StaffToken, error) {
+	var token db.StaffToken
+	if err := s.db.First(&token, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &token, nil
+}
+
 func (s *StaffService) List() ([]db.StaffToken, error) {
 	var tokens []db.StaffToken
 	if err := s.db.Order("created_at asc").Find(&tokens).Error; err != nil {

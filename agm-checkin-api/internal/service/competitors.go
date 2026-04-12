@@ -147,6 +147,13 @@ func (s *CompetitorService) CheckIn(id string, staffName string) (*CompetitorWit
 	// Re-fetch to get the ID if it was an update (upsert may not populate ID on conflict path).
 	s.db.Where("competitor_id = ? AND event_id = ?", id, eventID).First(&ce)
 
+	// Keep lastRegisteredEvent in sync so the competitor stays visible
+	// to registration users for this event.
+	if competitor.LastRegisteredEvent != eventID {
+		s.db.Model(&competitor).Update("last_registered_event", eventID)
+		competitor.LastRegisteredEvent = eventID
+	}
+
 	return &CompetitorWithCheckIn{Competitor: competitor, CurrentCheckIn: &ce}, nil
 }
 

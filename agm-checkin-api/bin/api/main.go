@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -35,6 +36,7 @@ func main() {
 	authSvc := service.NewAuthService(database, pin)
 	staffSvc := service.NewStaffService(database)
 	eventSvc := service.NewEventService(database)
+	auditSvc := service.NewAuditService(database)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -51,16 +53,13 @@ func main() {
 	}))
 	r.Use(chimw.Recoverer)
 
-	// IP blocklist applies to all routes — blocked IPs can't reach auth either
 	r.Use(authmw.IPBlocklist(authSvc))
 
-	// Public endpoints
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	r.Post("/api/auth/token", createToken(authSvc))
 
-	// Protected routes — require a valid staff token
 	r.Group(func(r chi.Router) {
 		r.Use(authmw.RequireToken(authSvc))
 
@@ -70,32 +69,41 @@ func main() {
 
 		r.Get("/api/competitors", listCompetitors(competitorSvc))
 		r.Get("/api/competitors/{id}", getCompetitor(competitorSvc))
-		r.Post("/api/competitors", createCompetitor(competitorSvc))
-		r.Patch("/api/competitors/{id}/checkin", checkInCompetitor(competitorSvc))
-		r.Patch("/api/competitors/{id}/dob", updateDOB(competitorSvc))
-		r.Patch("/api/competitors/{id}/validate", validateCompetitor(competitorSvc))
-		r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc))
+		r.Post("/api/competitors", createCompetitor(competitorSvc, auditSvc))
+		r.Patch("/api/competitors/{id}/checkin", checkInCompetitor(competitorSvc, auditSvc))
+		r.Patch("/api/competitors/{id}/dob", updateDOB(competitorSvc, auditSvc))
+		r.Patch("/api/competitors/{id}/validate", validateCompetitor(competitorSvc, auditSvc))
+		r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc, auditSvc))
 		r.Get("/api/competitors/{id}/events", getCompetitorEvents(competitorSvc))
 
 		r.Get("/api/events", listEvents(eventSvc))
 		r.Get("/api/events/current", getCurrentEvent(eventSvc))
 
-		// Admin-only routes
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.RequireAdmin)
-			r.Patch("/api/competitors/{id}", updateCompetitor(competitorSvc))
+			r.Patch("/api/competitors/{id}", updateCompetitor(competitorSvc, auditSvc))
 
-			r.Post("/api/events", createEvent(eventSvc))
-			r.Patch("/api/events/{id}/current", setCurrentEvent(eventSvc))
+			r.Post("/api/events", createEvent(eventSvc, auditSvc))
+			r.Patch("/api/events/{id}/current", setCurrentEvent(eventSvc, auditSvc))
 
 			r.Get("/api/staff", listStaff(staffSvc))
-			r.Patch("/api/staff/{id}/role", updateStaffRole(staffSvc))
-			r.Delete("/api/staff/{id}", revokeStaff(staffSvc))
+			r.Patch("/api/staff/{id}/role", updateStaffRole(staffSvc, auditSvc))
+			r.Delete("/api/staff/{id}", revokeStaff(staffSvc, auditSvc))
+
+			r.Get("/api/audit", listAudit(auditSvc))
 		})
 	})
 
 	log.Println("Listening on :8080")
 	http.ListenAndServe(":8080", r)
+}
+
+// actorFrom extracts actor ID and display name from the request context.
+func actorFrom(r *http.Request) (id, name string) {
+	if staff := authmw.StaffFromContext(r.Context()); staff != nil {
+		return staff.ID, staff.FirstName + " " + staff.LastName
+	}
+	return "", "unknown"
 }
 
 func respondJSON(w http.ResponseWriter, status int, data any) {
@@ -171,7 +179,7 @@ func getCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 	}
 }
 
-func createCompetitor(svc *service.CompetitorService) http.HandlerFunc {
+func createCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var competitor db.Competitor
 		if err := json.NewDecoder(r.Body).Decode(&competitor); err != nil {
@@ -182,18 +190,26 @@ func createCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		actorID, actorName := actorFrom(r)
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "competitor.created",
+			EntityType: "competitor",
+			EntityID:   competitor.ID,
+			EntityName: competitor.NameFirst + " " + competitor.NameLast,
+			Detail:     map[string]any{"studio": competitor.Studio, "lastRegisteredEvent": competitor.LastRegisteredEvent},
+			IP:         authmw.GetClientIP(r),
+		})
 		respondJSON(w, http.StatusCreated, competitor)
 	}
 }
 
-func checkInCompetitor(svc *service.CompetitorService) http.HandlerFunc {
+func checkInCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		staffName := ""
-		if staff := authmw.StaffFromContext(r.Context()); staff != nil {
-			staffName = staff.FirstName + " " + staff.LastName
-		}
-		result, err := svc.CheckIn(id, staffName)
+		actorID, actorName := actorFrom(r)
+		result, err := svc.CheckIn(id, actorName)
 		if err != nil {
 			if errors.Is(err, service.ErrNoCurrentEvent) {
 				respondJSON(w, http.StatusConflict, map[string]string{"error": "no current event is set"})
@@ -202,11 +218,22 @@ func checkInCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		detail := map[string]any{"eventId": result.CurrentCheckIn.EventID}
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "competitor.checked_in",
+			EntityType: "competitor",
+			EntityID:   id,
+			EntityName: result.NameFirst + " " + result.NameLast,
+			Detail:     detail,
+			IP:         authmw.GetClientIP(r),
+		})
 		respondJSON(w, http.StatusOK, result)
 	}
 }
 
-func updateDOB(svc *service.CompetitorService) http.HandlerFunc {
+func updateDOB(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		var body struct {
@@ -221,11 +248,22 @@ func updateDOB(svc *service.CompetitorService) http.HandlerFunc {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		actorID, actorName := actorFrom(r)
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "competitor.dob_updated",
+			EntityType: "competitor",
+			EntityID:   id,
+			EntityName: competitor.NameFirst + " " + competitor.NameLast,
+			Detail:     map[string]any{"newDob": body.DateOfBirth.Format("2006-01-02")},
+			IP:         authmw.GetClientIP(r),
+		})
 		respondJSON(w, http.StatusOK, competitor)
 	}
 }
 
-func validateCompetitor(svc *service.CompetitorService) http.HandlerFunc {
+func validateCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		competitor, err := svc.Validate(id)
@@ -233,11 +271,21 @@ func validateCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		actorID, actorName := actorFrom(r)
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "competitor.validated",
+			EntityType: "competitor",
+			EntityID:   id,
+			EntityName: competitor.NameFirst + " " + competitor.NameLast,
+			IP:         authmw.GetClientIP(r),
+		})
 		respondJSON(w, http.StatusOK, competitor)
 	}
 }
 
-func updateCompetitor(svc *service.CompetitorService) http.HandlerFunc {
+func updateCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		var input db.Competitor
@@ -250,17 +298,48 @@ func updateCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		actorID, actorName := actorFrom(r)
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "competitor.updated",
+			EntityType: "competitor",
+			EntityID:   id,
+			EntityName: competitor.NameFirst + " " + competitor.NameLast,
+			Detail: map[string]any{
+				"studio":              competitor.Studio,
+				"teacher":             competitor.Teacher,
+				"lastRegisteredEvent": competitor.LastRegisteredEvent,
+			},
+			IP: authmw.GetClientIP(r),
+		})
 		respondJSON(w, http.StatusOK, competitor)
 	}
 }
 
-func deleteCompetitor(svc *service.CompetitorService) http.HandlerFunc {
+func deleteCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
+		// Fetch name before deletion for the audit record.
+		existing, _ := svc.GetByID(id)
 		if err := svc.Delete(id); err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		entityName := id
+		if existing != nil {
+			entityName = existing.NameFirst + " " + existing.NameLast
+		}
+		actorID, actorName := actorFrom(r)
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "competitor.deleted",
+			EntityType: "competitor",
+			EntityID:   id,
+			EntityName: entityName,
+			IP:         authmw.GetClientIP(r),
+		})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -303,7 +382,7 @@ func getCurrentEvent(svc *service.EventService) http.HandlerFunc {
 	}
 }
 
-func createEvent(svc *service.EventService) http.HandlerFunc {
+func createEvent(svc *service.EventService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var event db.Event
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
@@ -318,11 +397,22 @@ func createEvent(svc *service.EventService) http.HandlerFunc {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		actorID, actorName := actorFrom(r)
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "event.created",
+			EntityType: "event",
+			EntityID:   event.ID,
+			EntityName: event.Name,
+			Detail:     map[string]any{"startDate": event.StartDate.Format("2006-01-02"), "endDate": event.EndDate.Format("2006-01-02")},
+			IP:         authmw.GetClientIP(r),
+		})
 		respondJSON(w, http.StatusCreated, event)
 	}
 }
 
-func setCurrentEvent(svc *service.EventService) http.HandlerFunc {
+func setCurrentEvent(svc *service.EventService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		event, err := svc.SetCurrent(id)
@@ -334,6 +424,16 @@ func setCurrentEvent(svc *service.EventService) http.HandlerFunc {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		actorID, actorName := actorFrom(r)
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "event.set_current",
+			EntityType: "event",
+			EntityID:   event.ID,
+			EntityName: event.Name,
+			IP:         authmw.GetClientIP(r),
+		})
 		respondJSON(w, http.StatusOK, event)
 	}
 }
@@ -349,7 +449,7 @@ func listStaff(svc *service.StaffService) http.HandlerFunc {
 	}
 }
 
-func updateStaffRole(svc *service.StaffService) http.HandlerFunc {
+func updateStaffRole(svc *service.StaffService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		requestor := authmw.StaffFromContext(r.Context())
@@ -362,6 +462,8 @@ func updateStaffRole(svc *service.StaffService) http.HandlerFunc {
 			return
 		}
 
+		// Capture old role before the update for the audit detail.
+		existing, _ := svc.GetByID(id)
 		token, err := svc.UpdateRole(id, body.Role, requestor.ID)
 		if err != nil {
 			switch {
@@ -376,15 +478,31 @@ func updateStaffRole(svc *service.StaffService) http.HandlerFunc {
 			}
 			return
 		}
+		detail := map[string]any{"newRole": body.Role}
+		if existing != nil {
+			detail["oldRole"] = existing.Role
+		}
+		actorID, actorName := actorFrom(r)
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "staff.role_updated",
+			EntityType: "staff_token",
+			EntityID:   id,
+			EntityName: token.FirstName + " " + token.LastName,
+			Detail:     detail,
+			IP:         authmw.GetClientIP(r),
+		})
 		respondJSON(w, http.StatusOK, token)
 	}
 }
 
-func revokeStaff(svc *service.StaffService) http.HandlerFunc {
+func revokeStaff(svc *service.StaffService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		requestor := authmw.StaffFromContext(r.Context())
 
+		existing, _ := svc.GetByID(id)
 		if err := svc.Revoke(id, requestor.ID); err != nil {
 			switch {
 			case errors.Is(err, service.ErrStaffNotFound):
@@ -396,6 +514,34 @@ func revokeStaff(svc *service.StaffService) http.HandlerFunc {
 			}
 			return
 		}
+		entityName := id
+		if existing != nil {
+			entityName = existing.FirstName + " " + existing.LastName
+		}
+		actorID, actorName := actorFrom(r)
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "staff.revoked",
+			EntityType: "staff_token",
+			EntityID:   id,
+			EntityName: entityName,
+			IP:         authmw.GetClientIP(r),
+		})
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func listAudit(svc *service.AuditService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		action := r.URL.Query().Get("action")
+		actorName := r.URL.Query().Get("actor")
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		logs, err := svc.List(action, actorName, limit)
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusOK, logs)
 	}
 }

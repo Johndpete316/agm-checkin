@@ -29,6 +29,7 @@ const adminNavLinks = [
   ...baseNavLinks,
   { label: 'Events', path: '/events' },
   { label: 'Manage Users', path: '/manage-users' },
+  { label: 'Audit Log', path: '/audit' },
 ]
 
 export default function NavBar() {

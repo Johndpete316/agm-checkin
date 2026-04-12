@@ -61,11 +61,28 @@ func (ce *CompetitorEvent) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// AuditLog records every state-changing operation with who did it, what changed, and from where.
+// DetailRaw stores action-specific JSON (e.g. new role, event ID) — excluded from JSON output;
+// callers should embed it as json.RawMessage in a view struct.
+type AuditLog struct {
+	ID         string    `gorm:"primaryKey;type:uuid" json:"id"`
+	ActorID    string    `gorm:"index;not null" json:"actorId"`
+	ActorName  string    `gorm:"not null" json:"actorName"`
+	Action     string    `gorm:"not null;index" json:"action"`
+	EntityType string    `gorm:"not null;index" json:"entityType"`
+	EntityID   string    `gorm:"not null;index" json:"entityId"`
+	EntityName string    `json:"entityName"`
+	DetailRaw  string    `gorm:"column:detail;not null;default:'{}'" json:"-"`
+	IPAddress  string    `json:"ipAddress"`
+	CreatedAt  time.Time `gorm:"index" json:"createdAt"`
+}
+
 func AutoMigrate(database *gorm.DB) {
 	database.AutoMigrate(
 		&Competitor{},
 		&Event{},
 		&CompetitorEvent{},
+		&AuditLog{},
 		&IPBlocklist{},
 		&PINAttempt{},
 		&StaffToken{},

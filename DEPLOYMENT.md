@@ -86,6 +86,10 @@ cloudflared:
 
 api:
   authPin: <staff access code>
+
+pgadmin:
+  email: <pgadmin login email>
+  password: <pgadmin password>
 ```
 
 `authPin` is the access code staff enter at login. Distribute it out-of-band (verbally).
@@ -99,18 +103,21 @@ Routing is configured in the Cloudflare dashboard, not in code:
 
 1. Go to [one.dash.cloudflare.com](https://one.dash.cloudflare.com) → Networks → Tunnels
 2. Click your tunnel → **Public Hostnames**
-3. Add two routes:
+3. Add routes:
 
 | Hostname | Service |
 |---|---|
 | `checkin.reduxit.net` | `http://agm-checkin-frontend:80` |
 | `api.checkin.reduxit.net` | `http://agm-checkin-api:8080` |
+| `pgadmin.checkin.reduxit.net` | `http://agm-checkin-pgadmin:80` |
 
-The service names (`agm-checkin-frontend`, `agm-checkin-api`) match the Helm release name
+The service names (`agm-checkin-frontend`, `agm-checkin-api`, `agm-checkin-pgadmin`) match the Helm release name
 prefix. If you install with `helm install agm-checkin ...` the services will be named exactly that.
 
 Two cloudflared replicas run in the cluster, each maintaining their own connection to
 Cloudflare's edge. If one pod dies, traffic automatically flows through the other.
+
+**pgAdmin access**: pgAdmin runs as a ClusterIP service exposed only through the Cloudflare Tunnel. It has a 1Gi PVC for session/preferences storage. Add an Access policy in Cloudflare Zero Trust to restrict who can reach the pgadmin hostname.
 
 ---
 
@@ -136,9 +143,26 @@ agm-checkin-api-xxxxx          1/1     Running
 agm-checkin-frontend-xxxxx     1/1     Running
 agm-checkin-frontend-xxxxx     1/1     Running
 agm-checkin-postgres-0         1/1     Running
+agm-checkin-pgadmin-xxxxx      1/1     Running
 agm-checkin-cloudflared-xxxxx  1/1     Running
 agm-checkin-cloudflared-xxxxx  1/1     Running
 ```
+
+### Bootstrap after first deploy
+
+After the first deploy, two manual steps are required:
+
+**1. Create the first event** (via pgAdmin or port-forward):
+```sql
+INSERT INTO events (id, name, start_date, end_date, is_current)
+VALUES ('glr-2026', 'GLR 2026', '2026-03-14', '2026-03-16', true);
+```
+
+**2. Promote the first admin user** — have the target person log in through the UI first to create their token, then:
+```sql
+UPDATE staff_tokens SET role = 'admin' WHERE first_name = 'John' AND last_name = 'Peterson';
+```
+After this, the admin can manage all other users' roles through the Manage Users page.
 
 ### Seed the database (dev only)
 
@@ -218,4 +242,6 @@ kubectl exec -it deployment/agm-checkin-api -- sh
 | Cloudflare shows tunnel offline | cloudflared pods not up | `kubectl logs -l app=agm-cloudflared` |
 | Site loads but API calls fail | Wrong VITE_API_URL baked in | Rebuild frontend with correct --build-arg |
 | postgres pod `Pending` | No storage available | `kubectl describe pod agm-checkin-postgres-0` |
-| Port Forwarding for triage | kubectl port-forward svc/agm-checkin-api 8080:808 | to test and validate out test cases |
+| pgAdmin pod `Pending` | PVC not bound | `kubectl describe pvc agm-checkin-pgadmin-data` |
+| pgAdmin shows wrong email/password | Credentials set at first start; PVC cached old values | Delete PVC and pod to force re-init, or recreate with correct values before first start |
+| Port Forwarding for triage | `kubectl port-forward svc/agm-checkin-api 8080:8080` | Test API directly without going through Cloudflare |
