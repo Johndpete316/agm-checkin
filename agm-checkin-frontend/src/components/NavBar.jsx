@@ -19,17 +19,24 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useColorMode } from '../App'
 import { useAuth } from '../context/AuthContext'
 
-const navLinks = [
+const baseNavLinks = [
   { label: 'Check In', path: '/home' },
   { label: 'Competitors', path: '/competitors' },
   { label: 'Stats', path: '/stats' },
+]
+
+const adminNavLinks = [
+  ...baseNavLinks,
+  { label: 'Manage Users', path: '/manage-users' },
 ]
 
 export default function NavBar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { mode, toggle } = useColorMode()
-  const { staff, logout } = useAuth()
+  const { staff, isAdmin, logout } = useAuth()
+
+  const navLinks = isAdmin ? adminNavLinks : baseNavLinks
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   function handleLogout() {

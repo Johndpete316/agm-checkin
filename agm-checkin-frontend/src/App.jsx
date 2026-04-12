@@ -8,6 +8,7 @@ import CheckInPage from './pages/CheckInPage'
 import CompetitorsPage from './pages/CompetitorsPage'
 import StatsPage from './pages/StatsPage'
 import LoginPage from './pages/LoginPage'
+import ManageUsersPage from './pages/ManageUsersPage'
 import { buildTheme } from './theme'
 import { AuthProvider, useAuth } from './context/AuthContext'
 
@@ -23,6 +24,13 @@ function getInitialMode() {
 function ProtectedRoute({ children }) {
   const { token } = useAuth()
   if (!token) return <Navigate to="/login" replace />
+  return children
+}
+
+function AdminRoute({ children }) {
+  const { token, isAdmin } = useAuth()
+  if (!token) return <Navigate to="/login" replace />
+  if (!isAdmin) return <Navigate to="/home" replace />
   return children
 }
 
@@ -42,6 +50,7 @@ function AppLayout() {
           <Route path="/home" element={<ProtectedRoute><CheckInPage /></ProtectedRoute>} />
           <Route path="/competitors" element={<ProtectedRoute><CompetitorsPage /></ProtectedRoute>} />
           <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
+          <Route path="/manage-users" element={<AdminRoute><ManageUsersPage /></AdminRoute>} />
           <Route path="*" element={<Navigate to="/home" replace />} />
         </Routes>
       </Box>

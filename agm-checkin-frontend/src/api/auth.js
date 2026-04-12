@@ -11,5 +11,5 @@ export async function requestToken(pin, firstName, lastName) {
   if (res.status === 403) throw new Error('blocked')
   if (!res.ok) throw new Error('server_error')
 
-  return res.json() // { token, firstName, lastName }
+  return res.json() // { token, firstName, lastName, role }
 }

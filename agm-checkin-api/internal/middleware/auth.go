@@ -58,6 +58,21 @@ func IPBlocklist(authSvc *service.AuthService) func(http.Handler) http.Handler {
 	}
 }
 
+// RequireAdmin must be used inside a RequireToken group.
+// Returns 403 if the authenticated staff member does not have the "admin" role.
+func RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		staff := StaffFromContext(r.Context())
+		if staff == nil || staff.Role != "admin" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]string{"error": "admin access required"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // RequireToken validates the Bearer token in the Authorization header.
 // On success, injects the StaffToken into the request context.
 // Apply this to all protected API routes.

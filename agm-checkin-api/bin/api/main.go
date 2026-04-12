@@ -33,6 +33,7 @@ func main() {
 
 	competitorSvc := service.NewCompetitorService(database)
 	authSvc := service.NewAuthService(database, pin)
+	staffSvc := service.NewStaffService(database)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -69,6 +70,14 @@ func main() {
 		r.Patch("/api/competitors/{id}/dob", updateDOB(competitorSvc))
 		r.Patch("/api/competitors/{id}/validate", validateCompetitor(competitorSvc))
 		r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc))
+
+		// Admin-only staff management
+		r.Group(func(r chi.Router) {
+			r.Use(authmw.RequireAdmin)
+			r.Get("/api/staff", listStaff(staffSvc))
+			r.Patch("/api/staff/{id}/role", updateStaffRole(staffSvc))
+			r.Delete("/api/staff/{id}", revokeStaff(staffSvc))
+		})
 	})
 
 	log.Println("Listening on :8080")
@@ -117,6 +126,7 @@ func createToken(authSvc *service.AuthService) http.HandlerFunc {
 			"token":     token.Token,
 			"firstName": token.FirstName,
 			"lastName":  token.LastName,
+			"role":      token.Role,
 		})
 	}
 }
@@ -212,6 +222,68 @@ func deleteCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 		id := chi.URLParam(r, "id")
 		if err := svc.Delete(id); err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func listStaff(svc *service.StaffService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tokens, err := svc.List()
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusOK, tokens)
+	}
+}
+
+func updateStaffRole(svc *service.StaffService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		requestor := authmw.StaffFromContext(r.Context())
+
+		var body struct {
+			Role string `json:"role"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+
+		token, err := svc.UpdateRole(id, body.Role, requestor.ID)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrStaffNotFound):
+				respondJSON(w, http.StatusNotFound, map[string]string{"error": "staff token not found"})
+			case errors.Is(err, service.ErrInvalidRole):
+				respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			case errors.Is(err, service.ErrCannotSelfEdit):
+				respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			default:
+				respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			}
+			return
+		}
+		respondJSON(w, http.StatusOK, token)
+	}
+}
+
+func revokeStaff(svc *service.StaffService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		requestor := authmw.StaffFromContext(r.Context())
+
+		if err := svc.Revoke(id, requestor.ID); err != nil {
+			switch {
+			case errors.Is(err, service.ErrStaffNotFound):
+				respondJSON(w, http.StatusNotFound, map[string]string{"error": "staff token not found"})
+			case errors.Is(err, service.ErrCannotSelfEdit):
+				respondJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			default:
+				respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			}
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

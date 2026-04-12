@@ -32,7 +32,7 @@ export default function LoginPage() {
     setError('')
     try {
       const data = await requestToken(code, firstName, lastName)
-      login(data.token, data.firstName, data.lastName)
+      login(data.token, data.firstName, data.lastName, data.role)
       navigate('/home', { replace: true })
     } catch (err) {
       if (err.message === 'blocked') {

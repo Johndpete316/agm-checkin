@@ -19,5 +19,6 @@ type StaffToken struct {
 	Token     string    `gorm:"uniqueIndex;not null" json:"token"`
 	FirstName string    `gorm:"not null" json:"firstName"`
 	LastName  string    `gorm:"not null" json:"lastName"`
+	Role      string    `gorm:"not null;default:'registration'" json:"role"` // "registration" or "admin"
 	CreatedAt time.Time `json:"createdAt"`
 }
