@@ -117,12 +117,20 @@ func (s *AuthService) VerifyPINAndCreateToken(ip, pin, firstName, lastName strin
 	return staffToken, nil
 }
 
+// emptyToken is a fixed-length placeholder used for constant-time comparisons
+// when no token record is found in the database, preventing timing oracles
+// that could distinguish non-existent tokens from invalid ones.
+const emptyToken = "0000000000000000000000000000000000000000000000000000000000000000"
+
 func (s *AuthService) ValidateToken(token string) (*db.StaffToken, bool) {
 	var staffToken db.StaffToken
 	if err := s.db.Where("token = ?", token).First(&staffToken).Error; err != nil {
+		// Always compare against a dummy so both the DB-miss and DB-hit paths
+		// spend the same time in constant-time comparison, preventing a timing
+		// side-channel between non-existent and invalid tokens.
+		subtle.ConstantTimeCompare([]byte(emptyToken), []byte(token))
 		return nil, false
 	}
-	// Constant-time comparison to prevent timing oracle attacks on the token value.
 	if subtle.ConstantTimeCompare([]byte(staffToken.Token), []byte(token)) != 1 {
 		return nil, false
 	}
