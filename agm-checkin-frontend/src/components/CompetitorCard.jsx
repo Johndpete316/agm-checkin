@@ -51,6 +51,7 @@ function toInputDate(dob) {
 export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loading }) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editedDOB, setEditedDOB] = useState('')
+  const [originalDOB, setOriginalDOB] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [dialogError, setDialogError] = useState('')
 
@@ -61,7 +62,9 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
 
   const handleCheckInClick = () => {
     if (needsValidation) {
-      setEditedDOB(toInputDate(competitor.dateOfBirth))
+      const initial = toInputDate(competitor.dateOfBirth)
+      setEditedDOB(initial)
+      setOriginalDOB(initial)
       setDialogError('')
       setDialogOpen(true)
     } else {
@@ -73,7 +76,6 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
     setConfirming(true)
     setDialogError('')
     try {
-      const originalDOB = toInputDate(competitor.dateOfBirth)
       if (editedDOB && editedDOB !== originalDOB) {
         const updated = await updateCompetitorDOB(competitor.id, editedDOB)
         onUpdate?.(updated)
