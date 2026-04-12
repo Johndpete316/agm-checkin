@@ -6,3 +6,6 @@ agm-checkin-frontend/dist/
 
 *.sql
 .claude
+
+agm_data_dump
+*.csv
