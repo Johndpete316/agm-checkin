@@ -34,7 +34,7 @@ function formatDOB(dob) {
   if (!dob) return null
   const d = new Date(dob)
   if (isNaN(d.getTime()) || d.getFullYear() < 1900) return null
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
 // Convert stored DOB to YYYY-MM-DD for the date input using UTC to avoid day-shift
