@@ -120,13 +120,6 @@ func main() {
 		dob := randomDOB(rng)
 		age := 2026 - dob.Year()
 
-		isCheckedIn := rng.Float32() < 0.4
-		var checkInDateTime *time.Time
-		if isCheckedIn {
-			t := randomCheckinTime(eventDays[rng.Intn(len(eventDays))], rng)
-			checkInDateTime = &t
-		}
-
 		// Competitors under 18 require age/identity validation
 		requiresValidation := age < 18
 
@@ -154,8 +147,6 @@ func main() {
 			DateOfBirth:         dob,
 			RequiresValidation:  requiresValidation,
 			Validated:           validated,
-			IsCheckedIn:         isCheckedIn,
-			CheckInDateTime:     checkInDateTime,
 			ShirtSize:           shirtSizes[rng.Intn(len(shirtSizes))],
 			Email:               email,
 			Teacher:             teachers[rng.Intn(len(teachers))],

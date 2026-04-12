@@ -10,20 +10,37 @@ import (
 )
 
 type Competitor struct {
-	ID                  string     `gorm:"primaryKey;type:uuid" json:"id"`
-	NameFirst           string     `json:"nameFirst"`
-	NameLast            string     `json:"nameLast"`
-	DateOfBirth         time.Time  `json:"dateOfBirth"`
-	RequiresValidation  bool       `json:"requiresValidation"`
-	Validated           bool       `json:"validated"`
-	IsCheckedIn         bool       `json:"isCheckedIn"`
-	CheckInDateTime     *time.Time `json:"checkInDateTime"`
-	CheckedInBy         string     `json:"checkedInBy"`
-	ShirtSize           string     `json:"shirtSize"`
-	Email               string     `json:"email"`
-	Teacher             string     `json:"teacher"`
-	Studio              string     `json:"studio"`
-	LastRegisteredEvent string     `json:"lastRegisteredEvent"`
+	ID                  string    `gorm:"primaryKey;type:uuid" json:"id"`
+	NameFirst           string    `json:"nameFirst"`
+	NameLast            string    `json:"nameLast"`
+	DateOfBirth         time.Time `json:"dateOfBirth"`
+	RequiresValidation  bool      `json:"requiresValidation"`
+	Validated           bool      `json:"validated"`
+	ShirtSize           string    `json:"shirtSize"`
+	Email               string    `json:"email"`
+	Teacher             string    `json:"teacher"`
+	Studio              string    `json:"studio"`
+	LastRegisteredEvent string    `json:"lastRegisteredEvent"`
+}
+
+// Event represents a competition event (e.g. "glr-2026").
+type Event struct {
+	ID        string    `gorm:"primaryKey" json:"id"` // human-readable slug, e.g. "glr-2026"
+	Name      string    `gorm:"not null" json:"name"`
+	StartDate time.Time `json:"startDate"`
+	EndDate   time.Time `json:"endDate"`
+	IsCurrent bool      `gorm:"not null;default:false" json:"isCurrent"`
+}
+
+// CompetitorEvent records a competitor's participation in a specific event.
+// The unique index on (competitor_id, event_id) ensures one row per competitor per event.
+type CompetitorEvent struct {
+	ID              string     `gorm:"primaryKey;type:uuid" json:"id"`
+	CompetitorID    string     `gorm:"not null;uniqueIndex:idx_competitor_event" json:"competitorId"`
+	EventID         string     `gorm:"not null;uniqueIndex:idx_competitor_event" json:"eventId"`
+	CheckedIn       bool       `gorm:"not null;default:false" json:"checkedIn"`
+	CheckInDatetime *time.Time `json:"checkInDatetime"` // null for historical imports
+	CheckedInBy     string     `json:"checkedInBy"`     // empty for historical imports
 }
 
 func (c *Competitor) BeforeCreate(tx *gorm.DB) error {
@@ -39,9 +56,16 @@ func Connect(dsn string) *gorm.DB {
 	return database
 }
 
+func (ce *CompetitorEvent) BeforeCreate(tx *gorm.DB) error {
+	ce.ID = uuid.New().String()
+	return nil
+}
+
 func AutoMigrate(database *gorm.DB) {
 	database.AutoMigrate(
 		&Competitor{},
+		&Event{},
+		&CompetitorEvent{},
 		&IPBlocklist{},
 		&PINAttempt{},
 		&StaffToken{},

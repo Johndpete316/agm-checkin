@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import EditIcon from '@mui/icons-material/Edit'
+import IconButton from '@mui/material/IconButton'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import Table from '@mui/material/Table'
@@ -28,18 +30,21 @@ import {
   updateCompetitorDOB,
   validateCompetitor,
 } from '../api/competitors'
+import { useAuth } from '../context/AuthContext'
+import EditCompetitorDialog from '../components/EditCompetitorDialog'
 
 // Sortable columns — id must match the JSON field name from the API
 const columns = [
   { id: 'nameLast', label: 'Name' },
+  { id: 'lastRegisteredEvent', label: 'Event' },
   { id: 'studio', label: 'Studio' },
   { id: 'teacher', label: 'Teacher' },
   { id: 'shirtSize', label: 'Shirt' },
-  { id: 'dateOfBirth', label: 'Birthday' },
-  { id: 'dateOfBirth', label: 'Age' },
+  { id: 'dateOfBirth', label: 'DOB / Age' },
+  { id: 'email', label: 'Email' },
   { id: 'validated', label: 'Validated' },
-  { id: 'isCheckedIn', label: 'Status' },
-  { id: 'checkInDateTime', label: 'Check-In Time' },
+  { id: 'currentCheckIn', label: 'Status' },
+  { id: 'currentCheckIn', label: 'Check-In Time' },
 ]
 
 function descendingComparator(a, b, orderBy) {
@@ -89,6 +94,7 @@ function toInputDate(dob) {
 }
 
 export default function CompetitorsPage() {
+  const { isAdmin } = useAuth()
   const [competitors, setCompetitors] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -99,6 +105,7 @@ export default function CompetitorsPage() {
   const [editedDOB, setEditedDOB] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [dialogError, setDialogError] = useState('')
+  const [editTarget, setEditTarget] = useState(null)
 
   const fetchCompetitors = useCallback(async () => {
     setLoading(true)
@@ -126,6 +133,8 @@ export default function CompetitorsPage() {
   const updateLocalCompetitor = (updated) => {
     setCompetitors(prev => prev.map(c => (c.id === updated.id ? { ...c, ...updated } : c)))
   }
+
+  const isCheckedIn = (competitor) => !!competitor.currentCheckIn?.checkedIn
 
   const handleCheckInClick = (competitor) => {
     if (competitor.requiresValidation && !competitor.validated) {
@@ -207,11 +216,16 @@ export default function CompetitorsPage() {
                       <Typography variant="body2" color="text.secondary" noWrap>
                         {competitor.teacher || '—'}
                       </Typography>
+                      {competitor.lastRegisteredEvent && (
+                        <Typography variant="caption" color="text.secondary" noWrap display="block">
+                          {competitor.lastRegisteredEvent}
+                        </Typography>
+                      )}
                     </Box>
                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
                       <Chip
-                        label={competitor.isCheckedIn ? 'Checked In' : 'Pending'}
-                        color={competitor.isCheckedIn ? 'success' : 'default'}
+                        label={isCheckedIn(competitor) ? 'Checked In' : 'Pending'}
+                        color={isCheckedIn(competitor) ? 'success' : 'default'}
                         size="small"
                       />
                       {competitor.requiresValidation && (
@@ -238,8 +252,8 @@ export default function CompetitorsPage() {
                       <Typography variant="body1" fontWeight={700}>{competitor.shirtSize || '—'}</Typography>
                     </Box>
                   </Box>
-                  {!competitor.isCheckedIn && (
-                    <Box sx={{ mt: 1.5 }}>
+                  <Box sx={{ mt: 1.5, display: 'flex', gap: 1 }}>
+                    {!isCheckedIn(competitor) && (
                       <Button
                         size="small"
                         variant="outlined"
@@ -249,8 +263,13 @@ export default function CompetitorsPage() {
                       >
                         {checkingIn === competitor.id ? 'Checking in…' : 'Check In'}
                       </Button>
-                    </Box>
-                  )}
+                    )}
+                    {isAdmin && (
+                      <IconButton size="small" onClick={() => setEditTarget(competitor)}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    )}
+                  </Box>
                 </Paper>
               )
             })}
@@ -282,11 +301,19 @@ export default function CompetitorsPage() {
                   return (
                     <TableRow key={competitor.id} hover>
                       <TableCell>{competitor.nameFirst} {competitor.nameLast}</TableCell>
+                      <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                        {competitor.lastRegisteredEvent || '—'}
+                      </TableCell>
                       <TableCell>{competitor.studio || '—'}</TableCell>
                       <TableCell>{competitor.teacher || '—'}</TableCell>
                       <TableCell>{competitor.shirtSize || '—'}</TableCell>
-                      <TableCell>{dob || '—'}</TableCell>
-                      <TableCell>{age !== null ? `${age} yrs` : '—'}</TableCell>
+                      <TableCell>
+                        <Typography variant="body2">{dob || '—'}</Typography>
+                        {age !== null && (
+                          <Typography variant="caption" color="text.secondary">{age} yrs</Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>{competitor.email || '—'}</TableCell>
                       <TableCell>
                         {competitor.requiresValidation ? (
                           competitor.validated ? (
@@ -304,34 +331,41 @@ export default function CompetitorsPage() {
                       </TableCell>
                       <TableCell>
                         <Chip
-                          label={competitor.isCheckedIn ? 'Checked In' : 'Pending'}
-                          color={competitor.isCheckedIn ? 'success' : 'default'}
+                          label={isCheckedIn(competitor) ? 'Checked In' : 'Pending'}
+                          color={isCheckedIn(competitor) ? 'success' : 'default'}
                           size="small"
                         />
                       </TableCell>
                       <TableCell>
-                        {competitor.checkInDateTime ? (
+                        {competitor.currentCheckIn?.checkInDatetime ? (
                           <>
-                            {new Date(competitor.checkInDateTime).toLocaleString()}
-                            {competitor.checkedInBy && (
+                            {new Date(competitor.currentCheckIn.checkInDatetime).toLocaleString()}
+                            {competitor.currentCheckIn.checkedInBy && (
                               <Typography variant="caption" color="text.secondary" display="block">
-                                {competitor.checkedInBy}
+                                {competitor.currentCheckIn.checkedInBy}
                               </Typography>
                             )}
                           </>
                         ) : '—'}
                       </TableCell>
                       <TableCell>
-                        {!competitor.isCheckedIn && (
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            onClick={() => handleCheckInClick(competitor)}
-                            disabled={checkingIn === competitor.id}
-                          >
-                            {checkingIn === competitor.id ? 'Checking in…' : 'Check In'}
-                          </Button>
-                        )}
+                        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                          {!isCheckedIn(competitor) && (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => handleCheckInClick(competitor)}
+                              disabled={checkingIn === competitor.id}
+                            >
+                              {checkingIn === competitor.id ? 'Checking in…' : 'Check In'}
+                            </Button>
+                          )}
+                          {isAdmin && (
+                            <IconButton size="small" onClick={() => setEditTarget(competitor)}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          )}
+                        </Box>
                       </TableCell>
                     </TableRow>
                   )
@@ -341,6 +375,16 @@ export default function CompetitorsPage() {
           </TableContainer>
         </>
       )}
+
+      <EditCompetitorDialog
+        competitor={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSaved={updated => {
+          const existing = competitors.find(c => c.id === updated.id)
+          updateLocalCompetitor({ ...updated, currentCheckIn: existing?.currentCheckIn })
+          setEditTarget(null)
+        }}
+      />
 
       <Dialog
         open={!!validateTarget}

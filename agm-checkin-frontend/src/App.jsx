@@ -9,6 +9,7 @@ import CompetitorsPage from './pages/CompetitorsPage'
 import StatsPage from './pages/StatsPage'
 import LoginPage from './pages/LoginPage'
 import ManageUsersPage from './pages/ManageUsersPage'
+import EventsPage from './pages/EventsPage'
 import { buildTheme } from './theme'
 import { AuthProvider, useAuth } from './context/AuthContext'
 
@@ -50,6 +51,7 @@ function AppLayout() {
           <Route path="/home" element={<ProtectedRoute><CheckInPage /></ProtectedRoute>} />
           <Route path="/competitors" element={<ProtectedRoute><CompetitorsPage /></ProtectedRoute>} />
           <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
+          <Route path="/events" element={<AdminRoute><EventsPage /></AdminRoute>} />
           <Route path="/manage-users" element={<AdminRoute><ManageUsersPage /></AdminRoute>} />
           <Route path="*" element={<Navigate to="/home" replace />} />
         </Routes>

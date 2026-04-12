@@ -34,6 +34,7 @@ func main() {
 	competitorSvc := service.NewCompetitorService(database)
 	authSvc := service.NewAuthService(database, pin)
 	staffSvc := service.NewStaffService(database)
+	eventSvc := service.NewEventService(database)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -74,10 +75,19 @@ func main() {
 		r.Patch("/api/competitors/{id}/dob", updateDOB(competitorSvc))
 		r.Patch("/api/competitors/{id}/validate", validateCompetitor(competitorSvc))
 		r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc))
+		r.Get("/api/competitors/{id}/events", getCompetitorEvents(competitorSvc))
 
-		// Admin-only staff management
+		r.Get("/api/events", listEvents(eventSvc))
+		r.Get("/api/events/current", getCurrentEvent(eventSvc))
+
+		// Admin-only routes
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.RequireAdmin)
+			r.Patch("/api/competitors/{id}", updateCompetitor(competitorSvc))
+
+			r.Post("/api/events", createEvent(eventSvc))
+			r.Patch("/api/events/{id}/current", setCurrentEvent(eventSvc))
+
 			r.Get("/api/staff", listStaff(staffSvc))
 			r.Patch("/api/staff/{id}/role", updateStaffRole(staffSvc))
 			r.Delete("/api/staff/{id}", revokeStaff(staffSvc))
@@ -138,7 +148,9 @@ func createToken(authSvc *service.AuthService) http.HandlerFunc {
 func listCompetitors(svc *service.CompetitorService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		search := r.URL.Query().Get("search")
-		competitors, err := svc.GetAll(search)
+		staff := authmw.StaffFromContext(r.Context())
+		adminView := staff != nil && staff.Role == "admin"
+		competitors, err := svc.GetAll(search, adminView)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -181,12 +193,16 @@ func checkInCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 		if staff := authmw.StaffFromContext(r.Context()); staff != nil {
 			staffName = staff.FirstName + " " + staff.LastName
 		}
-		competitor, err := svc.CheckIn(id, staffName)
+		result, err := svc.CheckIn(id, staffName)
 		if err != nil {
+			if errors.Is(err, service.ErrNoCurrentEvent) {
+				respondJSON(w, http.StatusConflict, map[string]string{"error": "no current event is set"})
+				return
+			}
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		respondJSON(w, http.StatusOK, competitor)
+		respondJSON(w, http.StatusOK, result)
 	}
 }
 
@@ -221,6 +237,23 @@ func validateCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 	}
 }
 
+func updateCompetitor(svc *service.CompetitorService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var input db.Competitor
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		competitor, err := svc.Update(id, input)
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusOK, competitor)
+	}
+}
+
 func deleteCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
@@ -229,6 +262,79 @@ func deleteCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func getCompetitorEvents(svc *service.CompetitorService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		history, err := svc.GetEventHistory(id)
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusOK, history)
+	}
+}
+
+func listEvents(svc *service.EventService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		events, err := svc.List()
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusOK, events)
+	}
+}
+
+func getCurrentEvent(svc *service.EventService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		event, err := svc.GetCurrent()
+		if err != nil {
+			if errors.Is(err, service.ErrNoCurrentEvent) {
+				respondJSON(w, http.StatusOK, nil)
+				return
+			}
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusOK, event)
+	}
+}
+
+func createEvent(svc *service.EventService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var event db.Event
+		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		if event.ID == "" || event.Name == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "id and name are required"})
+			return
+		}
+		if err := svc.Create(&event); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusCreated, event)
+	}
+}
+
+func setCurrentEvent(svc *service.EventService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		event, err := svc.SetCurrent(id)
+		if err != nil {
+			if errors.Is(err, service.ErrEventNotFound) {
+				respondJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
+				return
+			}
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusOK, event)
 	}
 }
 

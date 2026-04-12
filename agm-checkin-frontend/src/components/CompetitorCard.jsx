@@ -12,7 +12,9 @@ import DialogTitle from '@mui/material/DialogTitle'
 import DialogContent from '@mui/material/DialogContent'
 import DialogActions from '@mui/material/DialogActions'
 import TextField from '@mui/material/TextField'
+import Divider from '@mui/material/Divider'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import { updateCompetitorDOB, validateCompetitor } from '../api/competitors'
 
 function calculateAge(dob) {
@@ -37,7 +39,6 @@ function formatDOB(dob) {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
-// Convert stored DOB to YYYY-MM-DD for the date input using UTC to avoid day-shift
 function toInputDate(dob) {
   if (!dob) return ''
   const d = new Date(dob)
@@ -55,6 +56,7 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
   const [confirming, setConfirming] = useState(false)
   const [dialogError, setDialogError] = useState('')
 
+  const isCheckedIn = !!competitor.currentCheckIn?.checkedIn
   const needsValidation = competitor.requiresValidation && !competitor.validated
   const age = calculateAge(competitor.dateOfBirth)
   const dob = formatDOB(competitor.dateOfBirth)
@@ -99,13 +101,10 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                <Typography
-                  variant="h6"
-                  sx={{ fontSize: { xs: '1.2rem', sm: '1.25rem' }, lineHeight: 1.3 }}
-                >
+                <Typography variant="h6" sx={{ fontSize: { xs: '1.2rem', sm: '1.25rem' }, lineHeight: 1.3 }}>
                   {fullName}
                 </Typography>
-                {needsValidation && !competitor.isCheckedIn && (
+                {needsValidation && !isCheckedIn && (
                   <Chip
                     icon={<WarningAmberIcon fontSize="small" />}
                     label="Validate"
@@ -114,17 +113,31 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
                     variant="outlined"
                   />
                 )}
+                {competitor.validated && competitor.requiresValidation && (
+                  <Chip
+                    icon={<CheckCircleOutlineIcon fontSize="small" />}
+                    label="Validated"
+                    color="success"
+                    size="small"
+                    variant="outlined"
+                  />
+                )}
               </Box>
+              {competitor.lastRegisteredEvent && (
+                <Typography variant="caption" color="text.secondary">
+                  {competitor.lastRegisteredEvent}
+                </Typography>
+              )}
             </Box>
             <Chip
-              label={competitor.isCheckedIn ? 'Checked In' : 'Pending'}
-              color={competitor.isCheckedIn ? 'success' : 'default'}
+              label={isCheckedIn ? 'Checked In' : 'Pending'}
+              color={isCheckedIn ? 'success' : 'default'}
               size="small"
               sx={{ mt: 0.5, ml: 1, flexShrink: 0 }}
             />
           </Box>
 
-          {/* Key fields — Age, DOB, Shirt */}
+          {/* Key fields */}
           <Box
             sx={{
               display: 'flex',
@@ -138,61 +151,52 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
             }}
           >
             <Box>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
-                Age
-              </Typography>
-              <Typography
-                variant="body1"
-                fontWeight={700}
-                sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}
-              >
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Age</Typography>
+              <Typography variant="body1" fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}>
                 {age !== null ? `${age} yrs` : '—'}
               </Typography>
             </Box>
             <Box>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
-                Date of Birth
-              </Typography>
-              <Typography
-                variant="body1"
-                fontWeight={700}
-                sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}
-              >
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Date of Birth</Typography>
+              <Typography variant="body1" fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}>
                 {dob || '—'}
               </Typography>
             </Box>
             <Box>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
-                T-Shirt
-              </Typography>
-              <Typography
-                variant="body1"
-                fontWeight={700}
-                sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}
-              >
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>T-Shirt</Typography>
+              <Typography variant="body1" fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}>
                 {competitor.shirtSize || '—'}
               </Typography>
             </Box>
           </Box>
 
           {/* Secondary fields */}
-          <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', mb: 0.5 }}>
             <Typography variant="body2" color="text.secondary">
               <strong>Studio:</strong> {competitor.studio || '—'}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               <strong>Teacher:</strong> {competitor.teacher || '—'}
             </Typography>
+            {competitor.email && (
+              <Typography variant="body2" color="text.secondary">
+                <strong>Email:</strong> {competitor.email}
+              </Typography>
+            )}
           </Box>
 
-          {competitor.isCheckedIn && competitor.checkInDateTime && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              Checked in at {new Date(competitor.checkInDateTime).toLocaleString()}
-              {competitor.checkedInBy && ` · ${competitor.checkedInBy}`}
-            </Typography>
+          {isCheckedIn && competitor.currentCheckIn?.checkInDatetime && (
+            <>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="caption" color="text.secondary">
+                Checked in at {new Date(competitor.currentCheckIn.checkInDatetime).toLocaleString()}
+                {competitor.currentCheckIn.checkedInBy && ` · ${competitor.currentCheckIn.checkedInBy}`}
+              </Typography>
+            </>
           )}
         </CardContent>
-        {!competitor.isCheckedIn && (
+
+        {!isCheckedIn && (
           <CardActions sx={{ pt: 0, px: 2, pb: 2 }}>
             <Button
               variant="contained"
@@ -234,21 +238,11 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
             sx={{ mt: 1 }}
             helperText="Update if the date on file is incorrect."
           />
-          {dialogError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {dialogError}
-            </Alert>
-          )}
+          {dialogError && <Alert severity="error" sx={{ mt: 2 }}>{dialogError}</Alert>}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setDialogOpen(false)} disabled={confirming}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleConfirm}
-            disabled={confirming || !editedDOB}
-          >
+          <Button onClick={() => setDialogOpen(false)} disabled={confirming}>Cancel</Button>
+          <Button variant="contained" onClick={handleConfirm} disabled={confirming || !editedDOB}>
             {confirming ? 'Saving…' : 'Confirmed — Check In'}
           </Button>
         </DialogActions>

@@ -27,6 +27,7 @@ const baseNavLinks = [
 
 const adminNavLinks = [
   ...baseNavLinks,
+  { label: 'Events', path: '/events' },
   { label: 'Manage Users', path: '/manage-users' },
 ]
 

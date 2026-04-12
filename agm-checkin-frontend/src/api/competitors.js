@@ -69,6 +69,22 @@ export async function validateCompetitor(id) {
   return res.json()
 }
 
+export async function updateCompetitor(id, data) {
+  const res = await apiFetch(`${BASE_URL}/api/competitors/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Failed to update competitor')
+  return res.json()
+}
+
+export async function getCompetitorEvents(id) {
+  const res = await apiFetch(`${BASE_URL}/api/competitors/${id}/events`)
+  if (!res.ok) throw new Error('Failed to fetch competitor event history')
+  return res.json()
+}
+
 export async function deleteCompetitor(id) {
   const res = await apiFetch(`${BASE_URL}/api/competitors/${id}`, {
     method: 'DELETE',
