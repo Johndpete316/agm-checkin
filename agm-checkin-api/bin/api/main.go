@@ -63,6 +63,10 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(authmw.RequireToken(authSvc))
 
+		r.Get("/api/auth/me", func(w http.ResponseWriter, r *http.Request) {
+			respondJSON(w, http.StatusOK, authmw.StaffFromContext(r.Context()))
+		})
+
 		r.Get("/api/competitors", listCompetitors(competitorSvc))
 		r.Get("/api/competitors/{id}", getCompetitor(competitorSvc))
 		r.Post("/api/competitors", createCompetitor(competitorSvc))
