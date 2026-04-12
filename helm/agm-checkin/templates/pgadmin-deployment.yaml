@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-pgadmin
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+    app: agm-pgadmin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agm-pgadmin
+  template:
+    metadata:
+      labels:
+        app: agm-pgadmin
+    spec:
+      securityContext:
+        fsGroup: 5050
+      containers:
+        - name: pgadmin
+          image: {{ .Values.pgadmin.image }}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          env:
+            - name: PGADMIN_DEFAULT_EMAIL
+              value: {{ .Values.pgadmin.email | quote }}
+            - name: PGADMIN_DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-pgadmin-secret
+                  key: password
+          volumeMounts:
+            - name: pgadmin-data
+              mountPath: /var/lib/pgadmin
+      volumes:
+        - name: pgadmin-data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-pgadmin-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-pgadmin-data
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.postgres.storageClass | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.pgadmin.storageSize }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-pgadmin-secret
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  password: {{ .Values.pgadmin.password | quote }}

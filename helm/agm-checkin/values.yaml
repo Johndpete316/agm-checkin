@@ -22,6 +22,12 @@ postgres:
   password: test
   db: agm_db
 
+pgadmin:
+  image: dpage/pgadmin4:latest
+  storageSize: 1Gi
+  email: admin@example.com  # override in values.secret.yaml
+  password: ""              # use values.secret.yaml
+
 cloudflared:
   replicaCount: 2
   tunnelToken: ""  # use values.secret.yaml
