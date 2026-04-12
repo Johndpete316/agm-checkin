@@ -4,6 +4,5 @@ agm-checkin-api/.env
 agm-checkin-frontend/node_modules/
 agm-checkin-frontend/dist/
 
-CLAUDE.md
 *.sql
 .claude
