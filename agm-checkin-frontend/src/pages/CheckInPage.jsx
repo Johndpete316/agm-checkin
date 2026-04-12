@@ -38,11 +38,15 @@ export default function CheckInPage() {
     return () => clearTimeout(timeout)
   }, [search, fetchCompetitors])
 
+  const handleUpdate = (updated) => {
+    setCompetitors(prev => prev.map(c => (c.id === updated.id ? { ...c, ...updated } : c)))
+  }
+
   const handleCheckIn = async (id) => {
     setCheckingIn(id)
     try {
       const updated = await checkInCompetitor(id)
-      setCompetitors(prev => prev.map(c => (c.id === id ? updated : c)))
+      setCompetitors(prev => prev.map(c => (c.id === id ? { ...c, ...updated } : c)))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -80,6 +84,7 @@ export default function CheckInPage() {
               key={competitor.id}
               competitor={competitor}
               onCheckIn={handleCheckIn}
+              onUpdate={handleUpdate}
               loading={checkingIn === competitor.id}
             />
           ))}

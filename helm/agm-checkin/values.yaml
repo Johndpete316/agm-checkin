@@ -7,6 +7,7 @@ api:
   image: agm-api
   tag: latest
   allowedOrigin: "https://checkin.reduxit.net"
+  authPin: ""  # Do not put the real PIN here — use values.secret.yaml instead
 
 frontend:
   replicaCount: 2

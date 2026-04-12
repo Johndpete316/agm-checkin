@@ -83,6 +83,9 @@ postgres:
 
 cloudflared:
   tunnelToken: <your tunnel token>
+
+api:
+  authPin: <your 4-digit PIN>
 ```
 
 To get a new tunnel token: Cloudflare Zero Trust → Networks → Tunnels → your tunnel → Configure → token.

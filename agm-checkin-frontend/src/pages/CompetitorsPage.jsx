@@ -17,13 +17,25 @@ import Dialog from '@mui/material/Dialog'
 import DialogTitle from '@mui/material/DialogTitle'
 import DialogContent from '@mui/material/DialogContent'
 import DialogActions from '@mui/material/DialogActions'
+import TextField from '@mui/material/TextField'
+import Tooltip from '@mui/material/Tooltip'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
-import { getCompetitors, checkInCompetitor } from '../api/competitors'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
+import {
+  getCompetitors,
+  checkInCompetitor,
+  updateCompetitorDOB,
+  validateCompetitor,
+} from '../api/competitors'
 
+// Sortable columns — id must match the JSON field name from the API
 const columns = [
-  { id: 'name', label: 'Name' },
-  { id: 'division', label: 'Division' },
-  { id: 'dateOfBirth', label: 'Date of Birth' },
+  { id: 'nameLast', label: 'Name' },
+  { id: 'studio', label: 'Studio' },
+  { id: 'teacher', label: 'Teacher' },
+  { id: 'shirtSize', label: 'Shirt' },
+  { id: 'dateOfBirth', label: 'Age / DOB' },
+  { id: 'validated', label: 'Validated' },
   { id: 'isCheckedIn', label: 'Status' },
   { id: 'checkInDateTime', label: 'Check-In Time' },
 ]
@@ -42,9 +54,36 @@ function getComparator(order, orderBy) {
     : (a, b) => -descendingComparator(a, b, orderBy)
 }
 
+function calculateAge(dob) {
+  if (!dob) return null
+  const birth = new Date(dob)
+  if (isNaN(birth.getTime()) || birth.getFullYear() < 1900) return null
+  const today = new Date()
+  let age = today.getFullYear() - birth.getFullYear()
+  if (
+    today.getMonth() < birth.getMonth() ||
+    (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())
+  ) {
+    age--
+  }
+  return age
+}
+
 function formatDOB(dob) {
-  if (!dob) return '—'
-  return new Date(dob).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  if (!dob) return null
+  const d = new Date(dob)
+  if (isNaN(d.getTime()) || d.getFullYear() < 1900) return null
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function toInputDate(dob) {
+  if (!dob) return ''
+  const d = new Date(dob)
+  if (isNaN(d.getTime()) || d.getFullYear() < 1900) return ''
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 export default function CompetitorsPage() {
@@ -52,9 +91,12 @@ export default function CompetitorsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [order, setOrder] = useState('asc')
-  const [orderBy, setOrderBy] = useState('name')
+  const [orderBy, setOrderBy] = useState('nameLast')
   const [checkingIn, setCheckingIn] = useState(null)
   const [validateTarget, setValidateTarget] = useState(null)
+  const [editedDOB, setEditedDOB] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [dialogError, setDialogError] = useState('')
 
   const fetchCompetitors = useCallback(async () => {
     setLoading(true)
@@ -79,8 +121,14 @@ export default function CompetitorsPage() {
     setOrderBy(column)
   }
 
+  const updateLocalCompetitor = (updated) => {
+    setCompetitors(prev => prev.map(c => (c.id === updated.id ? { ...c, ...updated } : c)))
+  }
+
   const handleCheckInClick = (competitor) => {
-    if (competitor.requiresValidation) {
+    if (competitor.requiresValidation && !competitor.validated) {
+      setEditedDOB(toInputDate(competitor.dateOfBirth))
+      setDialogError('')
       setValidateTarget(competitor)
     } else {
       doCheckIn(competitor.id)
@@ -91,7 +139,7 @@ export default function CompetitorsPage() {
     setCheckingIn(id)
     try {
       const updated = await checkInCompetitor(id)
-      setCompetitors(prev => prev.map(c => (c.id === id ? updated : c)))
+      updateLocalCompetitor(updated)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -99,10 +147,26 @@ export default function CompetitorsPage() {
     }
   }
 
-  const handleConfirm = () => {
-    const id = validateTarget.id
-    setValidateTarget(null)
-    doCheckIn(id)
+  const handleConfirm = async () => {
+    if (!validateTarget) return
+    setConfirming(true)
+    setDialogError('')
+    try {
+      const originalDOB = toInputDate(validateTarget.dateOfBirth)
+      if (editedDOB && editedDOB !== originalDOB) {
+        const updated = await updateCompetitorDOB(validateTarget.id, editedDOB)
+        updateLocalCompetitor(updated)
+      }
+      const validated = await validateCompetitor(validateTarget.id)
+      updateLocalCompetitor(validated)
+      const id = validateTarget.id
+      setValidateTarget(null)
+      doCheckIn(id)
+    } catch {
+      setDialogError('Failed to save. Please try again.')
+    } finally {
+      setConfirming(false)
+    }
   }
 
   const sorted = [...competitors].sort(getComparator(order, orderBy))
@@ -110,7 +174,7 @@ export default function CompetitorsPage() {
   return (
     <Box sx={{ mt: 4 }}>
       <Typography variant="h5" gutterBottom>
-        All Competitors - data is random, and meant to represent what could be....
+        All Competitors
       </Typography>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -123,7 +187,7 @@ export default function CompetitorsPage() {
         </Box>
       ) : (
         <TableContainer component={Paper} sx={{ borderRadius: 2 }}>
-          <Table>
+          <Table size="small">
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 600 } }}>
                 {columns.map(col => (
@@ -141,50 +205,79 @@ export default function CompetitorsPage() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {sorted.map(competitor => (
-                <TableRow key={competitor.id} hover>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {competitor.name}
-                      {competitor.requiresValidation && !competitor.isCheckedIn && (
-                        <WarningAmberIcon fontSize="small" color="warning" titleAccess="Requires validation" />
+              {sorted.map(competitor => {
+                const age = calculateAge(competitor.dateOfBirth)
+                const dob = formatDOB(competitor.dateOfBirth)
+                return (
+                  <TableRow key={competitor.id} hover>
+                    <TableCell>
+                      {competitor.nameFirst} {competitor.nameLast}
+                    </TableCell>
+                    <TableCell>{competitor.studio || '—'}</TableCell>
+                    <TableCell>{competitor.teacher || '—'}</TableCell>
+                    <TableCell>{competitor.shirtSize || '—'}</TableCell>
+                    <TableCell>
+                      {age !== null ? (
+                        <Tooltip title={dob || ''}>
+                          <span>{age} yrs</span>
+                        </Tooltip>
+                      ) : (
+                        <Typography variant="body2" color="text.disabled">—</Typography>
                       )}
-                    </Box>
-                  </TableCell>
-                  <TableCell>{competitor.division}</TableCell>
-                  <TableCell>{formatDOB(competitor.dateOfBirth)}</TableCell>
-                  <TableCell>
-                    <Chip
-                      label={competitor.isCheckedIn ? 'Checked In' : 'Pending'}
-                      color={competitor.isCheckedIn ? 'success' : 'default'}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    {competitor.checkInDateTime
-                      ? new Date(competitor.checkInDateTime).toLocaleString()
-                      : '—'}
-                  </TableCell>
-                  <TableCell>
-                    {!competitor.isCheckedIn && (
-                      <Button
+                    </TableCell>
+                    <TableCell>
+                      {competitor.requiresValidation ? (
+                        competitor.validated ? (
+                          <Tooltip title="Validated">
+                            <CheckCircleOutlineIcon fontSize="small" color="success" />
+                          </Tooltip>
+                        ) : (
+                          <Tooltip title="Requires validation">
+                            <WarningAmberIcon fontSize="small" color="warning" />
+                          </Tooltip>
+                        )
+                      ) : (
+                        <Typography variant="body2" color="text.disabled">—</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={competitor.isCheckedIn ? 'Checked In' : 'Pending'}
+                        color={competitor.isCheckedIn ? 'success' : 'default'}
                         size="small"
-                        variant="outlined"
-                        onClick={() => handleCheckInClick(competitor)}
-                        disabled={checkingIn === competitor.id}
-                      >
-                        {checkingIn === competitor.id ? 'Checking in…' : 'Check In'}
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      {competitor.checkInDateTime
+                        ? new Date(competitor.checkInDateTime).toLocaleString()
+                        : '—'}
+                    </TableCell>
+                    <TableCell>
+                      {!competitor.isCheckedIn && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => handleCheckInClick(competitor)}
+                          disabled={checkingIn === competitor.id}
+                        >
+                          {checkingIn === competitor.id ? 'Checking in…' : 'Check In'}
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         </TableContainer>
       )}
 
-      <Dialog open={!!validateTarget} onClose={() => setValidateTarget(null)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={!!validateTarget}
+        onClose={() => !confirming && setValidateTarget(null)}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <WarningAmberIcon color="warning" />
           Validate Before Check-In
@@ -192,28 +285,43 @@ export default function CompetitorsPage() {
         {validateTarget && (
           <DialogContent>
             <Typography variant="body1" gutterBottom>
-              <strong>{validateTarget.name}</strong> requires identity validation.
+              <strong>{validateTarget.nameFirst} {validateTarget.nameLast}</strong> requires identity validation.
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Division: {validateTarget.division}
-            </Typography>
-            <Box sx={{ mt: 2, p: 2, borderRadius: 2, bgcolor: 'action.hover' }}>
-              <Typography variant="caption" color="text.secondary" display="block">
-                Date of Birth
+            <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                Studio: {validateTarget.studio || '—'}
               </Typography>
-              <Typography variant="h6">
-                {formatDOB(validateTarget.dateOfBirth)}
+              <Typography variant="body2" color="text.secondary">
+                Teacher: {validateTarget.teacher || '—'}
               </Typography>
             </Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-              Confirm you have verified the competitor's date of birth before proceeding.
-            </Typography>
+            <TextField
+              fullWidth
+              label="Date of Birth"
+              type="date"
+              value={editedDOB}
+              onChange={e => setEditedDOB(e.target.value)}
+              slotProps={{ inputLabel: { shrink: true } }}
+              sx={{ mt: 1 }}
+              helperText="Update if the date on file is incorrect."
+            />
+            {dialogError && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {dialogError}
+              </Alert>
+            )}
           </DialogContent>
         )}
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setValidateTarget(null)}>Cancel</Button>
-          <Button variant="contained" onClick={handleConfirm}>
-            Confirmed — Check In
+          <Button onClick={() => setValidateTarget(null)} disabled={confirming}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleConfirm}
+            disabled={confirming || !editedDOB}
+          >
+            {confirming ? 'Saving…' : 'Confirmed — Check In'}
           </Button>
         </DialogActions>
       </Dialog>

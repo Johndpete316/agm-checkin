@@ -27,15 +27,30 @@ spec:
               value: "host={{ .Release.Name }}-postgres user={{ .Values.postgres.user }} password={{ .Values.postgres.password }} dbname={{ .Values.postgres.db }} port=5432 sslmode=disable"
             - name: ALLOWED_ORIGIN
               value: {{ .Values.api.allowedOrigin | quote }}
+            - name: AUTH_PIN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-api-secret
+                  key: authPin
           readinessProbe:
             httpGet:
-              path: /api/competitors
+              path: /health
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /api/competitors
+              path: /health
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 20
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-api-secret
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  authPin: {{ .Values.api.authPin | quote }}

@@ -10,14 +10,19 @@ import (
 )
 
 type Competitor struct {
-	ID                 string     `gorm:"primaryKey;type:uuid" json:"id"`
-	Name               string     `json:"name"`
-	Division           string     `json:"division"`
-	DateOfBirth        time.Time  `json:"dateOfBirth"`
-	RequiresValidation bool       `json:"requiresValidation"`
-	Validated          bool       `json:"validated"`
-	IsCheckedIn        bool       `json:"isCheckedIn"`
-	CheckInDateTime    *time.Time `json:"checkInDateTime"`
+	ID                  string     `gorm:"primaryKey;type:uuid" json:"id"`
+	NameFirst           string     `json:"nameFirst"`
+	NameLast            string     `json:"nameLast"`
+	DateOfBirth         time.Time  `json:"dateOfBirth"`
+	RequiresValidation  bool       `json:"requiresValidation"`
+	Validated           bool       `json:"validated"`
+	IsCheckedIn         bool       `json:"isCheckedIn"`
+	CheckInDateTime     *time.Time `json:"checkInDateTime"`
+	ShirtSize           string     `json:"shirtSize"`
+	Email               string     `json:"email"`
+	Teacher             string     `json:"teacher"`
+	Studio              string     `json:"studio"`
+	LastRegisteredEvent string     `json:"lastRegisteredEvent"`
 }
 
 func (c *Competitor) BeforeCreate(tx *gorm.DB) error {
@@ -34,5 +39,10 @@ func Connect(dsn string) *gorm.DB {
 }
 
 func AutoMigrate(database *gorm.DB) {
-	database.AutoMigrate(&Competitor{})
+	database.AutoMigrate(
+		&Competitor{},
+		&IPBlocklist{},
+		&PINAttempt{},
+		&StaffToken{},
+	)
 }

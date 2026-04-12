@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"os"
@@ -14,13 +15,12 @@ var firstNames = []string{
 	"James", "Mary", "John", "Patricia", "Robert", "Jennifer", "Michael", "Linda",
 	"William", "Barbara", "David", "Susan", "Richard", "Jessica", "Joseph", "Sarah",
 	"Thomas", "Karen", "Charles", "Lisa", "Christopher", "Nancy", "Daniel", "Betty",
-	"Matthew", "Margaret", "Anthony", "Sandra", "Mark", "Ashley", "Donald", "Emily",
-	"Steven", "Donna", "Paul", "Michelle", "Andrew", "Carol", "Joshua", "Amanda",
-	"Kenneth", "Melissa", "Kevin", "Deborah", "Brian", "Stephanie", "George", "Rebecca",
-	"Timothy", "Sharon", "Ronald", "Laura", "Edward", "Cynthia", "Jason", "Kathleen",
-	"Jeffrey", "Amy", "Ryan", "Angela", "Jacob", "Shirley", "Gary", "Anna",
-	"Nicholas", "Brenda", "Eric", "Pamela", "Jonathan", "Emma", "Stephen", "Nicole",
-	"Larry", "Helen", "Justin", "Samantha", "Scott", "Katherine", "Brandon", "Christine",
+	"Matthew", "Margaret", "Anthony", "Sandra", "Mark", "Ashley", "Emily", "Donna",
+	"Andrew", "Carol", "Joshua", "Amanda", "Kevin", "Melissa", "Brian", "Stephanie",
+	"Timothy", "Laura", "Jason", "Kathleen", "Ryan", "Angela", "Jacob", "Anna",
+	"Nicholas", "Emma", "Eric", "Samantha", "Jonathan", "Christine", "Justin", "Nicole",
+	"Brandon", "Helen", "Olivia", "Ethan", "Isabella", "Noah", "Sophia", "Liam",
+	"Ava", "Mason", "Mia", "Logan", "Charlotte", "Lucas", "Amelia", "Aiden",
 }
 
 var lastNames = []string{
@@ -30,41 +30,49 @@ var lastNames = []string{
 	"White", "Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson", "Walker",
 	"Young", "Allen", "King", "Wright", "Scott", "Torres", "Nguyen", "Hill", "Flores",
 	"Green", "Adams", "Nelson", "Baker", "Hall", "Rivera", "Campbell", "Mitchell",
-	"Carter", "Roberts",
+	"Carter", "Roberts", "Chen", "Kim", "Patel", "Okafor", "Kowalski", "Bergman",
 }
 
-var divisions = []string{
-	"Piano - Under 12",
-	"Piano - 13-18",
-	"Piano - Open",
-	"Voice - Under 12",
-	"Voice - 13-18",
-	"Voice - Open",
-	"Guitar - Under 12",
-	"Guitar - 13-18",
-	"Guitar - Open",
-	"Violin - Under 12",
-	"Violin - 13-18",
-	"Violin - Open",
-	"Cello - Under 12",
-	"Cello - 13-18",
-	"Cello - Open",
-	"Flute - Under 12",
-	"Flute - 13-18",
-	"Flute - Open",
-	"Trumpet - Under 12",
-	"Trumpet - 13-18",
-	"Trumpet - Open",
-	"Percussion - Under 12",
-	"Percussion - 13-18",
-	"Percussion - Open",
+var studios = []string{
+	"Harmony Music Academy",
+	"Crescendo School of Music",
+	"Allegro Music Studio",
+	"Northside Conservatory",
+	"Riverside School of the Arts",
+	"Maple Street Music",
+	"Belcanto Academy",
+	"Summit Music Academy",
+	"Vivace Music Studio",
+	"Westbrook School of Music",
+	"Pacific Arts Conservatory",
+	"Meadowlark Music Studio",
 }
+
+var teachers = []string{
+	"Dr. Patricia Holloway",
+	"Mr. James Whitfield",
+	"Ms. Karen Osei",
+	"Prof. David Nakamura",
+	"Mrs. Sandra Reyes",
+	"Mr. Christopher Bell",
+	"Ms. Angela Thornton",
+	"Dr. Michael Chen",
+	"Mrs. Laura Fitzgerald",
+	"Mr. Steven Park",
+	"Ms. Rachel Goldstein",
+	"Prof. William Torres",
+}
+
+var shirtSizes = []string{"XS", "S", "M", "L", "XL", "XXL"}
+
+// Valid event codes — the current event is glr-2026
+var validEvents = []string{"glr-2026", "nat-2025", "glr-2025", "nat-2024"}
 
 // Spread check-ins across 3 event days
 var eventDays = []time.Time{
-	time.Date(2025, 6, 13, 0, 0, 0, 0, time.Local),
-	time.Date(2025, 6, 14, 0, 0, 0, 0, time.Local),
-	time.Date(2025, 6, 15, 0, 0, 0, 0, time.Local),
+	time.Date(2026, 6, 12, 0, 0, 0, 0, time.Local),
+	time.Date(2026, 6, 13, 0, 0, 0, 0, time.Local),
+	time.Date(2026, 6, 14, 0, 0, 0, 0, time.Local),
 }
 
 func randomCheckinTime(day time.Time, rng *rand.Rand) time.Time {
@@ -72,17 +80,15 @@ func randomCheckinTime(day time.Time, rng *rand.Rand) time.Time {
 	return day.Add(8*time.Hour + time.Duration(minutes)*time.Minute)
 }
 
-func birthDateForDivision(division string, rng *rand.Rand) time.Time {
-	baseYear := 2025
+func randomDOB(rng *rand.Rand) time.Time {
+	// Mix of minors (ages 8–17) and adults (18–55), roughly 40/60
 	var age int
-	switch {
-	case strings.Contains(division, "Under 12"):
-		age = 7 + rng.Intn(5) // 7–11
-	case strings.Contains(division, "13-18"):
-		age = 13 + rng.Intn(6) // 13–18
-	default: // Open
-		age = 18 + rng.Intn(42) // 18–59
+	if rng.Float32() < 0.40 {
+		age = 8 + rng.Intn(10) // 8–17
+	} else {
+		age = 18 + rng.Intn(38) // 18–55
 	}
+	baseYear := 2026
 	month := time.Month(1 + rng.Intn(12))
 	day := 1 + rng.Intn(27)
 	return time.Date(baseYear-age, month, day, 0, 0, 0, 0, time.UTC)
@@ -105,13 +111,14 @@ func main() {
 	for len(competitors) < 100 {
 		first := firstNames[rng.Intn(len(firstNames))]
 		last := lastNames[rng.Intn(len(lastNames))]
-		name := first + " " + last
-		if seen[name] {
+		key := first + " " + last
+		if seen[key] {
 			continue
 		}
-		seen[name] = true
+		seen[key] = true
 
-		division := divisions[rng.Intn(len(divisions))]
+		dob := randomDOB(rng)
+		age := 2026 - dob.Year()
 
 		isCheckedIn := rng.Float32() < 0.4
 		var checkInDateTime *time.Time
@@ -120,13 +127,40 @@ func main() {
 			checkInDateTime = &t
 		}
 
+		// Competitors under 18 require age/identity validation
+		requiresValidation := age < 18
+
+		// If validation isn't required the competitor is considered validated.
+		// If it is required, randomly mark some as already validated to simulate
+		// staff having processed them ahead of time.
+		validated := !requiresValidation
+		if requiresValidation {
+			validated = rng.Float32() < 0.5
+		}
+
+		// Some minors have DOB missing — leave as zero time to represent unknown
+		if requiresValidation && rng.Float32() < 0.35 {
+			dob = time.Time{}
+		}
+
+		email := fmt.Sprintf("%s.%s@example.com",
+			strings.ToLower(first),
+			strings.ToLower(last),
+		)
+
 		competitors = append(competitors, db.Competitor{
-			Name:               name,
-			Division:           division,
-			DateOfBirth:        birthDateForDivision(division, rng),
-			RequiresValidation: rng.Float32() < 0.25,
-			IsCheckedIn:        isCheckedIn,
-			CheckInDateTime:    checkInDateTime,
+			NameFirst:           first,
+			NameLast:            last,
+			DateOfBirth:         dob,
+			RequiresValidation:  requiresValidation,
+			Validated:           validated,
+			IsCheckedIn:         isCheckedIn,
+			CheckInDateTime:     checkInDateTime,
+			ShirtSize:           shirtSizes[rng.Intn(len(shirtSizes))],
+			Email:               email,
+			Teacher:             teachers[rng.Intn(len(teachers))],
+			Studio:              studios[rng.Intn(len(studios))],
+			LastRegisteredEvent: validEvents[rng.Intn(len(validEvents))],
 		})
 	}
 

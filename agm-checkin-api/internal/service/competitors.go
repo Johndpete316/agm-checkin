@@ -20,7 +20,11 @@ func (s *CompetitorService) GetAll(search string) ([]db.Competitor, error) {
 	var competitors []db.Competitor
 	query := s.db
 	if search != "" {
-		query = query.Where("name ILIKE ?", "%"+search+"%")
+		like := "%" + search + "%"
+		query = query.Where(
+			"name_first ILIKE ? OR name_last ILIKE ? OR CONCAT(name_first, ' ', name_last) ILIKE ?",
+			like, like, like,
+		)
 	}
 	result := query.Find(&competitors)
 	return competitors, result.Error
@@ -48,6 +52,29 @@ func (s *CompetitorService) CheckIn(id string) (*db.Competitor, error) {
 		return tx.Save(&competitor).Error
 	})
 	return &competitor, err
+}
+
+func (s *CompetitorService) UpdateDOB(id string, dob time.Time) (*db.Competitor, error) {
+	var competitor db.Competitor
+	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	if err := s.db.Model(&competitor).Update("date_of_birth", dob).Error; err != nil {
+		return nil, err
+	}
+	return &competitor, nil
+}
+
+func (s *CompetitorService) Validate(id string) (*db.Competitor, error) {
+	var competitor db.Competitor
+	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	if err := s.db.Model(&competitor).Update("validated", true).Error; err != nil {
+		return nil, err
+	}
+	competitor.Validated = true
+	return &competitor, nil
 }
 
 func (s *CompetitorService) Delete(id string) error {

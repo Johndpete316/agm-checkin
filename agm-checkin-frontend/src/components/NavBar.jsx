@@ -4,10 +4,13 @@ import Typography from '@mui/material/Typography'
 import Button from '@mui/material/Button'
 import IconButton from '@mui/material/IconButton'
 import Box from '@mui/material/Box'
+import Divider from '@mui/material/Divider'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
-import { Link, useLocation } from 'react-router-dom'
+import LogoutIcon from '@mui/icons-material/Logout'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useColorMode } from '../App'
+import { useAuth } from '../context/AuthContext'
 
 const navLinks = [
   { label: 'Check In', path: '/home' },
@@ -17,7 +20,14 @@ const navLinks = [
 
 export default function NavBar() {
   const location = useLocation()
+  const navigate = useNavigate()
   const { mode, toggle } = useColorMode()
+  const { staff, logout } = useAuth()
+
+  function handleLogout() {
+    logout()
+    navigate('/login', { replace: true })
+  }
 
   return (
     <AppBar position="static">
@@ -41,8 +51,21 @@ export default function NavBar() {
               {link.label}
             </Button>
           ))}
-          <IconButton color="inherit" onClick={toggle} size="small" sx={{ ml: 1 }}>
+
+          <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: 'rgba(255,255,255,0.3)' }} />
+
+          {staff && (
+            <Typography variant="body2" sx={{ opacity: 0.85 }}>
+              {staff.firstName} {staff.lastName}
+            </Typography>
+          )}
+
+          <IconButton color="inherit" onClick={toggle} size="small">
             {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
+          </IconButton>
+
+          <IconButton color="inherit" onClick={handleLogout} size="small" title="Sign out">
+            <LogoutIcon fontSize="small" />
           </IconButton>
         </Box>
       </Toolbar>
