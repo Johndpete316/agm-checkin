@@ -9,6 +9,7 @@ package service_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +18,9 @@ import (
 	"gorm.io/gorm"
 )
 
-const testPIN = "test-pin-security-regression"
+// testPIN is deliberately long and clearly non-production so it cannot
+// accidentally match the AUTH_PIN of a real deployment.
+const testPIN = "test-pin-security-regression-NOT-FOR-PRODUCTION"
 
 // setupAuthSvc connects to the test database (or skips the test) and returns an
 // AuthService together with the underlying *gorm.DB for cleanup helpers.
@@ -84,7 +87,7 @@ func TestValidateToken_ValidToken_ReturnsStaffAndTrue(t *testing.T) {
 
 	tok := &db.StaffToken{
 		ID:        "test-uuid-validate-ok",
-		Token:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Token:     strings.Repeat("a", 64),
 		FirstName: "Test",
 		LastName:  "User",
 		CreatedAt: time.Now(),
