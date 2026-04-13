@@ -45,16 +45,39 @@ end
 set FILESIZE (wc -c < $FILEPATH | string trim)
 echo "[$TIMESTAMP] Dump complete — $FILESIZE bytes compressed"
 
+# ── Dedup check ───────────────────────────────────────────────────────────────
+# Hash the decompressed SQL so gzip's embedded timestamp doesn't cause false
+# positives. Skip upload if the content hasn't changed since the last run.
+
+set HASH_FILE "$BACKUP_DIR/.last_upload_hash"
+set CURRENT_HASH (zcat $FILEPATH | grep -vE '^-- (Started|Completed) on ' | sha256sum | string split ' ')[1]
+
+set SKIP_UPLOAD false
+if test -f $HASH_FILE
+    set LAST_HASH (cat $HASH_FILE | string trim)
+    if test "$CURRENT_HASH" = "$LAST_HASH"
+        echo "[$TIMESTAMP] Content unchanged (hash $CURRENT_HASH) — skipping upload"
+        set SKIP_UPLOAD true
+    else
+        echo "[$TIMESTAMP] Content changed — new hash $CURRENT_HASH"
+    end
+else
+    echo "[$TIMESTAMP] No previous hash on record — uploading"
+end
+
 # ── Sync to remote ────────────────────────────────────────────────────────────
 
-echo "[$TIMESTAMP] Uploading to $RCLONE_REMOTE ..."
-rclone copy $FILEPATH $RCLONE_REMOTE --log-level INFO --s3-no-check-bucket
+if test "$SKIP_UPLOAD" = false
+    echo "[$TIMESTAMP] Uploading to $RCLONE_REMOTE ..."
+    rclone copy $FILEPATH $RCLONE_REMOTE --log-level INFO --s3-no-check-bucket
 
-if test $status -ne 0
-    # Not fatal — local copy still exists. Alert if you have monitoring.
-    echo "[$TIMESTAMP] WARNING: rclone upload failed — backup saved locally only at $FILEPATH"
-else
-    echo "[$TIMESTAMP] Remote upload OK"
+    if test $status -ne 0
+        # Not fatal — local copy still exists. Alert if you have monitoring.
+        echo "[$TIMESTAMP] WARNING: rclone upload failed — backup saved locally only at $FILEPATH"
+    else
+        echo "[$TIMESTAMP] Remote upload OK"
+        echo $CURRENT_HASH > $HASH_FILE
+    end
 end
 
 # ── Rotate local backups ──────────────────────────────────────────────────────
