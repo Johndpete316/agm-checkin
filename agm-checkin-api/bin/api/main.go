@@ -68,7 +68,14 @@ func main() {
 
 	allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
 	if allowedOrigin == "" {
+		// Default to wildcard so existing deployments keep working, but warn
+		// loudly because a wildcard CORS policy reduces defence-in-depth.
+		// Set ALLOWED_ORIGIN to your frontend's exact origin in production
+		// (e.g. https://checkin.example.com).  See Finding 5 of the security
+		// review for details.
 		allowedOrigin = "*"
+		log.Println("WARNING: ALLOWED_ORIGIN not set; CORS policy allows any origin ('*')." +
+			" Set ALLOWED_ORIGIN=https://your-frontend.example.com in production.")
 	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{allowedOrigin},
