@@ -18,8 +18,7 @@
 set POSTGRES_POD  "agm-checkin-postgres-0"
 set BACKUP_DIR    "/var/backups/agm-checkin"
 set KEEP_LOCAL    96                            # 96 × 15 min = 24 h of local history
-set RCLONE_REMOTE "REMOTE_NAME:PATH"            # e.g. "b2:mybucket/agm-backups"
-                                                # run `rclone config` to set up the remote
+set RCLONE_REMOTE "r2:agm-db-backup/postgres_backups"            # e.g. "b2:mybucket/agm-backups"
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -49,7 +48,7 @@ echo "[$TIMESTAMP] Dump complete — $FILESIZE bytes compressed"
 # ── Sync to remote ────────────────────────────────────────────────────────────
 
 echo "[$TIMESTAMP] Uploading to $RCLONE_REMOTE ..."
-rclone copy $FILEPATH $RCLONE_REMOTE --log-level INFO
+rclone copy $FILEPATH $RCLONE_REMOTE --log-level INFO --s3-no-check-bucket
 
 if test $status -ne 0
     # Not fatal — local copy still exists. Alert if you have monitoring.
