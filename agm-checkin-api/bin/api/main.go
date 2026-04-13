@@ -630,11 +630,22 @@ func revokeStaff(svc *service.StaffService, audit *service.AuditService) http.Ha
 	}
 }
 
+const (
+	auditDefaultLimit = 100
+	auditMaxLimit     = 500
+)
+
 func listAudit(svc *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		action := r.URL.Query().Get("action")
 		actorName := r.URL.Query().Get("actor")
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		// Cap the limit to prevent unbounded result sets (Finding 9).
+		if limit <= 0 {
+			limit = auditDefaultLimit
+		} else if limit > auditMaxLimit {
+			limit = auditMaxLimit
+		}
 		logs, err := svc.List(action, actorName, limit)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
