@@ -338,6 +338,12 @@ func (s *CompetitorService) Validate(id string) (*db.Competitor, error) {
 	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
+	// Finding 12: reject the call if the competitor does not require validation.
+	// This prevents any authenticated staff member from arbitrarily marking
+	// competitors as validated when no identity check was intended.
+	if !competitor.RequiresValidation {
+		return nil, ErrValidationNotRequired
+	}
 	if err := s.db.Model(&competitor).Update("validated", true).Error; err != nil {
 		return nil, err
 	}
@@ -397,3 +403,10 @@ func (s *CompetitorService) GetEventHistory(competitorID string) ([]CompetitorEv
 
 // ErrNotFound is returned when a competitor record does not exist.
 var ErrNotFound = errors.New("competitor not found")
+
+// ErrValidationNotRequired is returned when staff attempt to validate a
+// competitor whose requiresValidation flag is false.  Calling /validate on
+// a competitor who does not require identity verification is a no-op from a
+// safety perspective and most likely indicates a programming error or an
+// attempt to set the validated flag on arbitrary records (Finding 12).
+var ErrValidationNotRequired = errors.New("competitor does not require identity validation")

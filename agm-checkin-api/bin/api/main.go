@@ -379,7 +379,14 @@ func validateCompetitor(svc *service.CompetitorService, audit *service.AuditServ
 		id := chi.URLParam(r, "id")
 		competitor, err := svc.Validate(id)
 		if err != nil {
-			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			switch {
+			case errors.Is(err, service.ErrValidationNotRequired):
+				respondJSON(w, http.StatusConflict, map[string]string{
+					"error": "competitor does not require identity validation",
+				})
+			default:
+				respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			}
 			return
 		}
 		actorID, actorName := actorFrom(r)
