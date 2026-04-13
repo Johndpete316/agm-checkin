@@ -191,10 +191,44 @@ func getCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 
 func createCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var competitor db.Competitor
-		if err := json.NewDecoder(r.Body).Decode(&competitor); err != nil {
+		// Use an explicit input struct that excludes security-sensitive fields
+		// (RequiresValidation, Validated) so callers cannot set them at creation
+		// time regardless of role. Those fields are managed by dedicated endpoints:
+		// PATCH /validate (any auth'd staff) and PATCH /{id} (admin-only).
+		var input struct {
+			NameFirst           string `json:"nameFirst"`
+			NameLast            string `json:"nameLast"`
+			DateOfBirth         string `json:"dateOfBirth"`
+			ShirtSize           string `json:"shirtSize"`
+			Email               string `json:"email"`
+			Teacher             string `json:"teacher"`
+			Studio              string `json:"studio"`
+			LastRegisteredEvent string `json:"lastRegisteredEvent"`
+			Note                string `json:"note"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
+		}
+		competitor := db.Competitor{
+			NameFirst:           input.NameFirst,
+			NameLast:            input.NameLast,
+			ShirtSize:           input.ShirtSize,
+			Email:               input.Email,
+			Teacher:             input.Teacher,
+			Studio:              input.Studio,
+			LastRegisteredEvent: input.LastRegisteredEvent,
+			Note:                input.Note,
+			// RequiresValidation and Validated intentionally omitted:
+			// they default to false and can only be set by authorised operations.
+		}
+		if input.DateOfBirth != "" {
+			dob, err := time.Parse(time.RFC3339, input.DateOfBirth)
+			if err != nil {
+				respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid dateOfBirth format; use RFC 3339"})
+				return
+			}
+			competitor.DateOfBirth = dob
 		}
 		if err := svc.Create(&competitor); err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
