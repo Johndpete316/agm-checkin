@@ -17,6 +17,12 @@ import (
 	"johndpete316/agm-checkin-api/internal/service"
 )
 
+// pinVerifier is the subset of service.AuthService used by the createToken handler.
+// Defined as an interface to allow testing without a live database.
+type pinVerifier interface {
+	VerifyPINAndCreateToken(ip, pin, firstName, lastName string) (*db.StaffToken, error)
+}
+
 func main() {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -36,6 +42,16 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
+
+	// Security headers applied to every response.
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			next.ServeHTTP(w, r)
+		})
+	})
 
 	allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
 	if allowedOrigin == "" {
@@ -81,7 +97,7 @@ func respondJSON(w http.ResponseWriter, status int, data any) {
 	json.NewEncoder(w).Encode(data)
 }
 
-func createToken(authSvc *service.AuthService) http.HandlerFunc {
+func createToken(authSvc pinVerifier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Code      string `json:"code"`
