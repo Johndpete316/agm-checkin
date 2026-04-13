@@ -127,7 +127,7 @@ func (s *AuthService) VerifyPINAndCreateToken(ip, pin, firstName, lastName strin
 			CreatedAt: time.Now(),
 		}
 		if s.tokenTTL > 0 {
-			exp := time.Now().Add(s.tokenTTL)
+			exp := t.CreatedAt.Add(s.tokenTTL)
 			t.ExpiresAt = &exp
 		}
 
