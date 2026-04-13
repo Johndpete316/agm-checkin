@@ -16,9 +16,31 @@ type PINAttempt struct {
 
 type StaffToken struct {
 	ID        string    `gorm:"primaryKey;type:uuid" json:"id"`
-	Token     string    `gorm:"uniqueIndex;not null" json:"token"`
+	Token     string    `gorm:"uniqueIndex;not null" json:"-"` // never serialised to JSON; only returned at creation time
 	FirstName string    `gorm:"not null" json:"firstName"`
 	LastName  string    `gorm:"not null" json:"lastName"`
 	Role      string    `gorm:"not null;default:'registration'" json:"role"` // "registration" or "admin"
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+// StaffView is the safe public representation of a StaffToken.
+// It omits the raw bearer token so it can be freely returned from list and
+// "me" endpoints without leaking credentials.
+type StaffView struct {
+	ID        string    `json:"id"`
+	FirstName string    `json:"firstName"`
+	LastName  string    `json:"lastName"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// ToView converts a StaffToken to a StaffView (no token field).
+func (s *StaffToken) ToView() StaffView {
+	return StaffView{
+		ID:        s.ID,
+		FirstName: s.FirstName,
+		LastName:  s.LastName,
+		Role:      s.Role,
+		CreatedAt: s.CreatedAt,
+	}
 }
