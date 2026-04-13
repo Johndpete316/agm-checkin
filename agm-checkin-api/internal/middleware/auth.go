@@ -7,8 +7,16 @@ import (
 	"strings"
 
 	"johndpete316/agm-checkin-api/internal/db"
-	"johndpete316/agm-checkin-api/internal/service"
 )
+
+// AuthChecker is the subset of service.AuthService the middleware requires.
+// Declaring it as an interface here keeps the middleware package free from a
+// direct dependency on the service package and makes it straightforward to
+// test with a lightweight in-memory stub.
+type AuthChecker interface {
+	IsIPBlocked(ip string) bool
+	ValidateToken(token string) (*db.StaffToken, bool)
+}
 
 type contextKey string
 
@@ -43,7 +51,7 @@ func StaffFromContext(ctx context.Context) *db.StaffToken {
 
 // IPBlocklist checks every request against the database blocklist.
 // Blocked IPs receive 403 immediately. Apply this globally, before auth routes.
-func IPBlocklist(authSvc *service.AuthService) func(http.Handler) http.Handler {
+func IPBlocklist(authSvc AuthChecker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := GetClientIP(r)
@@ -76,7 +84,7 @@ func RequireAdmin(next http.Handler) http.Handler {
 // RequireToken validates the Bearer token in the Authorization header.
 // On success, injects the StaffToken into the request context.
 // Apply this to all protected API routes.
-func RequireToken(authSvc *service.AuthService) func(http.Handler) http.Handler {
+func RequireToken(authSvc AuthChecker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
