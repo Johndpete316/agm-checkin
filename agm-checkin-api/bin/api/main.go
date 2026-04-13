@@ -32,6 +32,28 @@ func main() {
 		log.Fatal("AUTH_PIN environment variable is required")
 	}
 
+	// TRUSTED_PROXY controls which upstream headers are trusted for client-IP
+	// resolution.  "cloudflare" (default) trusts CF-Connecting-IP and
+	// X-Forwarded-For as set by Cloudflare Tunnel.  "direct" ignores all
+	// forwarding headers and uses only the TCP RemoteAddr, which is correct
+	// when the server is directly accessible (e.g. local development).
+	// See the security review (Finding 3) for details.
+	trustedProxy := authmw.TrustedProxy(os.Getenv("TRUSTED_PROXY"))
+	switch trustedProxy {
+	case authmw.TrustedProxyCloudflare, authmw.TrustedProxyDirect:
+		// valid
+	case "":
+		trustedProxy = authmw.TrustedProxyCloudflare
+		log.Println("WARNING: TRUSTED_PROXY not set; defaulting to 'cloudflare'." +
+			" Set TRUSTED_PROXY=direct when running without Cloudflare Tunnel" +
+			" to prevent IP-header spoofing.")
+	default:
+		log.Fatalf("invalid TRUSTED_PROXY value %q; must be 'cloudflare' or 'direct'", trustedProxy)
+	}
+	ipResolver := func(r *http.Request) string {
+		return authmw.GetClientIPWithMode(r, trustedProxy)
+	}
+
 	database := db.Connect(dsn)
 	db.AutoMigrate(database)
 
@@ -55,6 +77,10 @@ func main() {
 		MaxAge:         300,
 	}))
 	r.Use(chimw.Recoverer)
+
+	// Store the IP resolver in every request context so handlers call
+	// authmw.ClientIP(r) rather than the hard-coded GetClientIP helper.
+	r.Use(authmw.WithIPResolver(ipResolver))
 
 	r.Use(authmw.IPBlocklist(authSvc))
 
@@ -138,7 +164,7 @@ func createToken(authSvc *service.AuthService) http.HandlerFunc {
 			return
 		}
 
-		ip := authmw.GetClientIP(r)
+		ip := authmw.ClientIP(r)
 		token, err := authSvc.VerifyPINAndCreateToken(ip, req.Code, req.FirstName, req.LastName)
 		if err != nil {
 			switch {
@@ -243,7 +269,7 @@ func createCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 			EntityID:   competitor.ID,
 			EntityName: competitor.NameFirst + " " + competitor.NameLast,
 			Detail:     map[string]any{"studio": competitor.Studio, "lastRegisteredEvent": competitor.LastRegisteredEvent},
-			IP:         authmw.GetClientIP(r),
+			IP:         authmw.ClientIP(r),
 		})
 		respondJSON(w, http.StatusCreated, competitor)
 	}
@@ -271,7 +297,7 @@ func checkInCompetitor(svc *service.CompetitorService, audit *service.AuditServi
 			EntityID:   id,
 			EntityName: result.NameFirst + " " + result.NameLast,
 			Detail:     detail,
-			IP:         authmw.GetClientIP(r),
+			IP:         authmw.ClientIP(r),
 		})
 		respondJSON(w, http.StatusOK, result)
 	}
@@ -301,7 +327,7 @@ func updateDOB(svc *service.CompetitorService, audit *service.AuditService) http
 			EntityID:   id,
 			EntityName: competitor.NameFirst + " " + competitor.NameLast,
 			Detail:     map[string]any{"newDob": body.DateOfBirth.Format("2006-01-02")},
-			IP:         authmw.GetClientIP(r),
+			IP:         authmw.ClientIP(r),
 		})
 		respondJSON(w, http.StatusOK, competitor)
 	}
@@ -323,7 +349,7 @@ func validateCompetitor(svc *service.CompetitorService, audit *service.AuditServ
 			EntityType: "competitor",
 			EntityID:   id,
 			EntityName: competitor.NameFirst + " " + competitor.NameLast,
-			IP:         authmw.GetClientIP(r),
+			IP:         authmw.ClientIP(r),
 		})
 		respondJSON(w, http.StatusOK, competitor)
 	}
@@ -355,7 +381,7 @@ func updateCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 				"teacher":             competitor.Teacher,
 				"lastRegisteredEvent": competitor.LastRegisteredEvent,
 			},
-			IP: authmw.GetClientIP(r),
+			IP: authmw.ClientIP(r),
 		})
 		respondJSON(w, http.StatusOK, competitor)
 	}
@@ -382,7 +408,7 @@ func deleteCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 			EntityType: "competitor",
 			EntityID:   id,
 			EntityName: entityName,
-			IP:         authmw.GetClientIP(r),
+			IP:         authmw.ClientIP(r),
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -450,7 +476,7 @@ func createEvent(svc *service.EventService, audit *service.AuditService) http.Ha
 			EntityID:   event.ID,
 			EntityName: event.Name,
 			Detail:     map[string]any{"startDate": event.StartDate.Format("2006-01-02"), "endDate": event.EndDate.Format("2006-01-02")},
-			IP:         authmw.GetClientIP(r),
+			IP:         authmw.ClientIP(r),
 		})
 		respondJSON(w, http.StatusCreated, event)
 	}
@@ -476,7 +502,7 @@ func setCurrentEvent(svc *service.EventService, audit *service.AuditService) htt
 			EntityType: "event",
 			EntityID:   event.ID,
 			EntityName: event.Name,
-			IP:         authmw.GetClientIP(r),
+			IP:         authmw.ClientIP(r),
 		})
 		respondJSON(w, http.StatusOK, event)
 	}
@@ -539,7 +565,7 @@ func updateStaffRole(svc *service.StaffService, audit *service.AuditService) htt
 			EntityID:   id,
 			EntityName: token.FirstName + " " + token.LastName,
 			Detail:     detail,
-			IP:         authmw.GetClientIP(r),
+			IP:         authmw.ClientIP(r),
 		})
 		respondJSON(w, http.StatusOK, token)
 	}
@@ -574,7 +600,7 @@ func revokeStaff(svc *service.StaffService, audit *service.AuditService) http.Ha
 			EntityType: "staff_token",
 			EntityID:   id,
 			EntityName: entityName,
-			IP:         authmw.GetClientIP(r),
+			IP:         authmw.ClientIP(r),
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -637,7 +663,7 @@ func bulkImportCompetitors(svc *service.CompetitorService, audit *service.AuditS
 				"eventsCreated":      result.EventsCreated,
 				"eventEntriesAdded":  result.EventEntriesAdded,
 			},
-			IP: authmw.GetClientIP(r),
+			IP: authmw.ClientIP(r),
 		})
 
 		respondJSON(w, http.StatusOK, result)

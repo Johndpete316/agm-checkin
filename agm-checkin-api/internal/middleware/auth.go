@@ -14,20 +14,73 @@ type contextKey string
 
 const StaffTokenKey contextKey = "staffToken"
 
-// GetClientIP returns the real client IP, preferring the CF-Connecting-IP header
-// set by Cloudflare Tunnel. Falls back to X-Forwarded-For, then RemoteAddr.
+// TrustedProxy controls which upstream headers GetClientIP will believe.
+// Set via the TRUSTED_PROXY environment variable.
+//
+//   - "cloudflare" (default): trust CF-Connecting-IP set by Cloudflare Tunnel,
+//     fall back to X-Forwarded-For, then RemoteAddr.  Use only when the server
+//     is exclusively reachable via a Cloudflare Tunnel so these headers cannot
+//     be spoofed by a direct caller.
+//   - "direct": ignore all forwarding headers; use RemoteAddr only.  Safe for
+//     local development or when there is no trusted reverse proxy.
+type TrustedProxy string
+
+const (
+	TrustedProxyCloudflare TrustedProxy = "cloudflare"
+	TrustedProxyDirect     TrustedProxy = "direct"
+)
+
+// GetClientIP returns the real client IP according to the configured proxy
+// trust level.  When mode is TrustedProxyCloudflare the CF-Connecting-IP and
+// X-Forwarded-For headers are used; otherwise only RemoteAddr is used.
 func GetClientIP(r *http.Request) string {
-	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
-		return strings.TrimSpace(ip)
-	}
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		return strings.TrimSpace(strings.Split(ip, ",")[0])
+	return GetClientIPWithMode(r, TrustedProxyCloudflare)
+}
+
+// GetClientIPWithMode is the same as GetClientIP but accepts an explicit mode.
+// Use this variant when the proxy trust mode is read from configuration.
+func GetClientIPWithMode(r *http.Request, mode TrustedProxy) string {
+	if mode == TrustedProxyCloudflare {
+		if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+			return strings.TrimSpace(ip)
+		}
+		if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
+			return strings.TrimSpace(strings.Split(ip, ",")[0])
+		}
 	}
 	addr := r.RemoteAddr
 	if i := strings.LastIndex(addr, ":"); i != -1 {
 		return addr[:i]
 	}
 	return addr
+}
+
+// IPResolverMiddleware returns an http.Handler middleware that attaches an
+// IPResolver func to the request context so handlers can call GetClientIPWithMode
+// without hard-coding the proxy trust mode.  This avoids threading the mode
+// value through every call site.
+type IPResolver func(r *http.Request) string
+
+type ipResolverKey struct{}
+
+// WithIPResolver stores an IPResolver in the context so handlers can retrieve
+// the client IP without hard-coding a proxy trust mode.
+func WithIPResolver(resolver IPResolver) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := context.WithValue(r.Context(), ipResolverKey{}, resolver)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// ClientIP retrieves the client IP using the IPResolver stored in the context,
+// falling back to the default (cloudflare-trusted) mode if none is configured.
+func ClientIP(r *http.Request) string {
+	if fn, ok := r.Context().Value(ipResolverKey{}).(IPResolver); ok {
+		return fn(r)
+	}
+	return GetClientIP(r)
 }
 
 // StaffFromContext retrieves the authenticated staff token from the request context.
