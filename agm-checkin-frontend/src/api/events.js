@@ -1,7 +1,7 @@
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
 function authHeaders() {
-  const token = localStorage.getItem('agm_token')
+  const token = sessionStorage.getItem('agm_token')
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
@@ -11,8 +11,8 @@ async function apiFetch(url, options = {}) {
     headers: { ...options.headers, ...authHeaders() },
   })
   if (res.status === 401) {
-    localStorage.removeItem('agm_token')
-    localStorage.removeItem('agm_staff')
+    sessionStorage.removeItem('agm_token')
+    sessionStorage.removeItem('agm_staff')
     window.location.href = '/login'
     throw new Error('unauthorized')
   }
