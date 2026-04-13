@@ -68,7 +68,7 @@ func main() {
 
 	allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
 	if allowedOrigin == "" {
-		allowedOrigin = "*"
+		log.Fatal("no allowed origin set, please set an allowed origin with ALLOWED_ORIGIN environment variable.")
 	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{allowedOrigin},

@@ -9,6 +9,7 @@ set NODES \
 
 # Update VITE_API_URL to wherever your API tunnel will live
 set VITE_API_URL "https://apicheckin.reduxit.net"
+set ALLOWED_ORIGIN "https://checkin.reduxit.net"
 
 set API_IMAGE   "agm-api:latest"
 set FE_IMAGE    "agm-frontend:latest"
