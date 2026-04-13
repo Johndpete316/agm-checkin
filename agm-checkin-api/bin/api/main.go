@@ -50,6 +50,15 @@ func main() {
 	default:
 		log.Fatalf("invalid TRUSTED_PROXY value %q; must be 'cloudflare' or 'direct'", trustedProxy)
 	}
+	if trustedProxy == authmw.TrustedProxyCloudflare {
+		// Finding 11: when trusting Cloudflare headers the server MUST only be
+		// reachable via the Cloudflare Tunnel.  Direct access (e.g. an exposed
+		// Kubernetes NodePort) would let any caller forge CF-Connecting-IP and
+		// bypass rate-limiting.  Ensure NetworkPolicy / firewall rules deny all
+		// ingress that does not originate from the tunnel sidecar.
+		log.Println("INFO: trusted-proxy mode is 'cloudflare'. Ensure the server is" +
+			" exclusively reachable via Cloudflare Tunnel; direct access bypasses IP security.")
+	}
 	ipResolver := func(r *http.Request) string {
 		return authmw.GetClientIPWithMode(r, trustedProxy)
 	}
@@ -104,7 +113,15 @@ func main() {
 	r.Use(authmw.IPBlocklist(authSvc))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		// Finding 11: expose the trusted-proxy mode in the health response so
+		// operators and monitoring tools can verify the security configuration
+		// without having access to server logs.  If this endpoint is directly
+		// reachable from the internet without going through a Cloudflare Tunnel,
+		// the trustedProxy value shows whether IP spoofing is possible.
+		respondJSON(w, http.StatusOK, map[string]string{
+			"status":      "ok",
+			"trustedProxy": string(trustedProxy),
+		})
 	})
 	r.Post("/api/auth/token", createToken(authSvc))
 
