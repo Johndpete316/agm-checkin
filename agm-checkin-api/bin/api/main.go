@@ -127,6 +127,9 @@ func main() {
 			r.Get("/api/audit", listAudit(auditSvc))
 
 			r.Post("/api/competitors/import", bulkImportCompetitors(competitorSvc, auditSvc))
+
+			// Admin IP-blocklist management (Finding 4: unblock path).
+			r.Delete("/api/blocklist/{ip}", unblockIP(authSvc, auditSvc))
 		})
 	})
 
@@ -755,4 +758,31 @@ func parseImportCSV(r io.Reader) ([]service.ImportRow, []string) {
 	}
 
 	return rows, errs
+}
+
+// unblockIP removes an IP from the blocklist and clears its PIN attempts,
+// giving the address an immediate clean slate. Admin-only.
+func unblockIP(authSvc *service.AuthService, audit *service.AuditService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := chi.URLParam(r, "ip")
+		if ip == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "ip is required"})
+			return
+		}
+		if err := authSvc.UnblockIP(ip); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		actorID, actorName := actorFrom(r)
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "blocklist.removed",
+			EntityType: "ip",
+			EntityID:   ip,
+			EntityName: ip,
+			IP:         authmw.ClientIP(r),
+		})
+		w.WriteHeader(http.StatusNoContent)
+	}
 }

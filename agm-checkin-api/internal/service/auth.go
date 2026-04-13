@@ -13,7 +13,14 @@ import (
 	"johndpete316/agm-checkin-api/internal/db"
 )
 
-const maxPINAttempts = 3
+const (
+	maxPINAttempts = 3
+	// pinAttemptWindow is the rolling window within which failed PIN attempts are
+	// counted against the per-IP limit.  Attempts older than this are ignored,
+	// which means a blocked IP automatically becomes unblocked after the window
+	// expires — preventing the permanent-block DoS described in Finding 4.
+	pinAttemptWindow = 15 * time.Minute
+)
 
 var (
 	ErrIPBlocked       = errors.New("ip address is blocked")
@@ -34,6 +41,18 @@ func (s *AuthService) IsIPBlocked(ip string) bool {
 	var count int64
 	s.db.Model(&db.IPBlocklist{}).Where("ip_address = ?", ip).Count(&count)
 	return count > 0
+}
+
+// UnblockIP removes the given IP from the blocklist and deletes its recorded
+// PIN attempts so it may immediately attempt login again.
+// This is the admin-facing recovery path for Finding 4 (permanent-block DoS).
+func (s *AuthService) UnblockIP(ip string) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("ip_address = ?", ip).Delete(&db.IPBlocklist{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("ip_address = ?", ip).Delete(&db.PINAttempt{}).Error
+	})
 }
 
 // VerifyPINAndCreateToken validates the PIN against the configured value,
@@ -57,8 +76,13 @@ func (s *AuthService) VerifyPINAndCreateToken(ip, pin, firstName, lastName strin
 			return err
 		}
 
+		// Only count attempts within the rolling window (Finding 4: time-bounded
+		// lockout so an IP does not stay blocked forever due to old attempts).
+		windowStart := time.Now().Add(-pinAttemptWindow)
 		var attemptCount int64
-		if err := tx.Model(&db.PINAttempt{}).Where("ip_address = ?", ip).Count(&attemptCount).Error; err != nil {
+		if err := tx.Model(&db.PINAttempt{}).
+			Where("ip_address = ? AND attempted_at > ?", ip, windowStart).
+			Count(&attemptCount).Error; err != nil {
 			return err
 		}
 
