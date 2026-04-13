@@ -124,9 +124,7 @@ func main() {
 		r.Get("/api/competitors/{id}", getCompetitor(competitorSvc))
 		r.Post("/api/competitors", createCompetitor(competitorSvc, auditSvc))
 		r.Patch("/api/competitors/{id}/checkin", checkInCompetitor(competitorSvc, auditSvc))
-		r.Patch("/api/competitors/{id}/dob", updateDOB(competitorSvc, auditSvc))
 		r.Patch("/api/competitors/{id}/validate", validateCompetitor(competitorSvc, auditSvc))
-		r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc, auditSvc))
 		r.Get("/api/competitors/{id}/events", getCompetitorEvents(competitorSvc))
 
 		r.Get("/api/events", listEvents(eventSvc))
@@ -135,6 +133,10 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.RequireAdmin)
 			r.Patch("/api/competitors/{id}", updateCompetitor(competitorSvc, auditSvc))
+			// DELETE and PATCH /dob are destructive/safety-sensitive; admin-only.
+			// See Finding 7 of the security review.
+			r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc, auditSvc))
+			r.Patch("/api/competitors/{id}/dob", updateDOB(competitorSvc, auditSvc))
 
 			r.Post("/api/events", createEvent(eventSvc, auditSvc))
 			r.Patch("/api/events/{id}/current", setCurrentEvent(eventSvc, auditSvc))
