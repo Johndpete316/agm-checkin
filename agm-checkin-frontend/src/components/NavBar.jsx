@@ -18,6 +18,7 @@ import MenuIcon from '@mui/icons-material/Menu'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useColorMode } from '../App'
 import { useAuth } from '../context/AuthContext'
+import logo from '../assets/agm-125th-logo.png'
 
 const baseNavLinks = [
   { label: 'Check In', path: '/home' },
@@ -96,9 +97,17 @@ export default function NavBar() {
     <>
       <AppBar position="static">
         <Toolbar>
-          <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            AGM Check-In
-          </Typography>
+          <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box
+              component="img"
+              src={logo}
+              alt="AGM logo"
+              sx={{ height: 36, width: 'auto', display: 'block' }}
+            />
+            <Typography variant="h6">
+              AGM Check-In
+            </Typography>
+          </Box>
 
           {/* Desktop nav */}
           <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 1 }}>
