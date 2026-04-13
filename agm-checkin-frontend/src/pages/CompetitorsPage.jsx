@@ -409,7 +409,7 @@ export default function CompetitorsPage() {
               size="small"
               sx={{
                 '& td, & th': { fontSize: '0.78rem', px: 1.25, py: 0.6 },
-                '& td:nth-of-type(even), & th:nth-of-type(even)': {
+                '& tbody tr:nth-of-type(even)': {
                   bgcolor: 'action.hover',
                 },
               }}
