@@ -29,12 +29,15 @@ var (
 )
 
 type AuthService struct {
-	db  *gorm.DB
-	pin string
+	db     *gorm.DB
+	pin    string
+	tokenTTL time.Duration // 0 means no expiry (legacy / backwards-compat)
 }
 
-func NewAuthService(database *gorm.DB, pin string) *AuthService {
-	return &AuthService{db: database, pin: pin}
+// NewAuthService creates an AuthService. tokenTTL sets how long issued tokens
+// remain valid; pass 0 to disable expiry (not recommended for production).
+func NewAuthService(database *gorm.DB, pin string, tokenTTL time.Duration) *AuthService {
+	return &AuthService{db: database, pin: pin, tokenTTL: tokenTTL}
 }
 
 func (s *AuthService) IsIPBlocked(ip string) bool {
@@ -123,6 +126,10 @@ func (s *AuthService) VerifyPINAndCreateToken(ip, pin, firstName, lastName strin
 			LastName:  lastName,
 			CreatedAt: time.Now(),
 		}
+		if s.tokenTTL > 0 {
+			exp := time.Now().Add(s.tokenTTL)
+			t.ExpiresAt = &exp
+		}
 
 		if err := tx.Create(t).Error; err != nil {
 			return err
@@ -156,6 +163,10 @@ func (s *AuthService) ValidateToken(token string) (*db.StaffToken, bool) {
 		return nil, false
 	}
 	if subtle.ConstantTimeCompare([]byte(staffToken.Token), []byte(token)) != 1 {
+		return nil, false
+	}
+	// Enforce token expiry (Finding 6): reject tokens whose ExpiresAt has passed.
+	if staffToken.ExpiresAt != nil && time.Now().After(*staffToken.ExpiresAt) {
 		return nil, false
 	}
 	return &staffToken, true

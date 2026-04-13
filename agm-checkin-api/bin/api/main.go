@@ -57,8 +57,20 @@ func main() {
 	database := db.Connect(dsn)
 	db.AutoMigrate(database)
 
+	// TOKEN_TTL sets how long bearer tokens remain valid (e.g. "48h", "24h").
+	// Defaults to 48 hours.  Set to "0" to disable expiry (not recommended).
+	// See Finding 6 of the security review.
+	tokenTTL := 48 * time.Hour
+	if ttlStr := os.Getenv("TOKEN_TTL"); ttlStr != "" {
+		if d, err := time.ParseDuration(ttlStr); err != nil {
+			log.Fatalf("invalid TOKEN_TTL value %q: %v", ttlStr, err)
+		} else {
+			tokenTTL = d
+		}
+	}
+
 	competitorSvc := service.NewCompetitorService(database)
-	authSvc := service.NewAuthService(database, pin)
+	authSvc := service.NewAuthService(database, pin, tokenTTL)
 	staffSvc := service.NewStaffService(database)
 	eventSvc := service.NewEventService(database)
 	auditSvc := service.NewAuditService(database)
