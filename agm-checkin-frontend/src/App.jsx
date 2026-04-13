@@ -11,6 +11,7 @@ import LoginPage from './pages/LoginPage'
 import ManageUsersPage from './pages/ManageUsersPage'
 import EventsPage from './pages/EventsPage'
 import AuditPage from './pages/AuditPage'
+import ImportPage from './pages/ImportPage'
 import { buildTheme } from './theme'
 import { AuthProvider, useAuth } from './context/AuthContext'
 
@@ -55,6 +56,7 @@ function AppLayout() {
           <Route path="/events" element={<AdminRoute><EventsPage /></AdminRoute>} />
           <Route path="/audit" element={<AdminRoute><AuditPage /></AdminRoute>} />
           <Route path="/manage-users" element={<AdminRoute><ManageUsersPage /></AdminRoute>} />
+          <Route path="/import" element={<AdminRoute><ImportPage /></AdminRoute>} />
           <Route path="*" element={<Navigate to="/home" replace />} />
         </Routes>
       </Box>

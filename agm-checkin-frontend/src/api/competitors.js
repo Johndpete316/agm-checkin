@@ -91,3 +91,17 @@ export async function deleteCompetitor(id) {
   })
   if (!res.ok) throw new Error('Failed to delete competitor')
 }
+
+export async function importCompetitors(file) {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await apiFetch(`${BASE_URL}/api/competitors/import`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || 'Import failed')
+  }
+  return res.json()
+}

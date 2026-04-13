@@ -59,6 +59,7 @@ VALUES ('glr-2026', 'GLR 2026', '2026-03-14', '2026-03-16', true);
 |------|---------|
 | `bin/api/main.go` | Router, all HTTP handlers, server entrypoint |
 | `bin/seed/seed.go` | Seeds 100 realistic competitors for local development |
+| `bin/import/main.go` | CSV normalization script: reads 4 raw historical CSVs, outputs one normalized CSV to stdout |
 | `internal/db/db.go` | GORM models (`Competitor`, `Event`, `CompetitorEvent`, `AuditLog`), `Connect()`, `AutoMigrate()` |
 | `internal/db/auth.go` | Auth models: `IPBlocklist`, `PINAttempt`, `StaffToken` |
 | `internal/service/competitors.go` | `CompetitorService` — all competitor business logic |
@@ -88,6 +89,7 @@ Endpoints marked **Admin** additionally require `RequireAdmin` middleware (role 
 | PATCH | `/api/competitors/{id}/validate` | Required | Mark competitor as validated (`validated = true`) |
 | DELETE | `/api/competitors/{id}` | Required | Delete competitor |
 | GET | `/api/competitors/{id}/events` | Required | Full event history for a competitor |
+| POST | `/api/competitors/import` | Admin | Bulk import from normalized CSV upload (multipart `file` field); creates DB snapshot before writing |
 | GET | `/api/events` | Required | List all events (sorted by start_date desc) |
 | GET | `/api/events/current` | Required | Get the current event |
 | POST | `/api/events` | Admin | Create a new event |
@@ -235,6 +237,7 @@ Note: This project uses Node.js via nvm with fish shell: `fish -c "nvm use 24 &&
 | `src/pages/EventsPage.jsx` | `/events` (admin) — event list, set current event, create new event |
 | `src/pages/ManageUsersPage.jsx` | `/manage-users` (admin) — table of staff tokens; inline role changes; revoke with confirmation |
 | `src/pages/AuditPage.jsx` | `/audit` (admin) — audit log table with action filter and actor search |
+| `src/pages/ImportPage.jsx` | `/import` (admin) — CSV file upload with preview, triggers bulk competitor import |
 
 ### Auth flow
 

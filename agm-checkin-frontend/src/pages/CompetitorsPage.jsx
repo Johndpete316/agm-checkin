@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import EditIcon from '@mui/icons-material/Edit'
+import ViewColumnIcon from '@mui/icons-material/ViewColumn'
 import IconButton from '@mui/material/IconButton'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
@@ -22,6 +23,10 @@ import DialogActions from '@mui/material/DialogActions'
 import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Divider from '@mui/material/Divider'
+import Popover from '@mui/material/Popover'
+import FormGroup from '@mui/material/FormGroup'
+import FormControlLabel from '@mui/material/FormControlLabel'
+import Checkbox from '@mui/material/Checkbox'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import {
@@ -34,19 +39,40 @@ import { useAuth } from '../context/AuthContext'
 import EditCompetitorDialog from '../components/EditCompetitorDialog'
 import AddCompetitorDialog from '../components/AddCompetitorDialog'
 
-// Sortable columns — id must match the JSON field name from the API
-const columns = [
-  { id: 'nameLast', label: 'Name' },
-  { id: 'lastRegisteredEvent', label: 'Event' },
-  { id: 'studio', label: 'Studio' },
-  { id: 'teacher', label: 'Teacher' },
-  { id: 'shirtSize', label: 'Shirt' },
-  { id: 'dateOfBirth', label: 'DOB / Age' },
-  { id: 'email', label: 'Email' },
-  { id: 'validated', label: 'Validated' },
-  { id: 'currentCheckIn', label: 'Status' },
-  { id: 'currentCheckIn', label: 'Check-In Time' },
+// Chronological order used for event filter display
+const EVENT_ORDER = ['nat-2024', 'glr-2025', 'nat-2025', 'glr-2026']
+
+// Each column has a unique key, an optional sort field, and a label.
+// sort: null means the column is not sortable.
+const COLUMNS = [
+  { key: 'name',        sort: 'nameLast',           label: 'Name' },
+  { key: 'event',       sort: 'lastRegisteredEvent', label: 'Event' },
+  { key: 'studio',      sort: 'studio',              label: 'Studio' },
+  { key: 'teacher',     sort: 'teacher',             label: 'Teacher' },
+  { key: 'shirt',       sort: 'shirtSize',           label: 'Shirt' },
+  { key: 'dob',         sort: 'dateOfBirth',         label: 'DOB / Age' },
+  { key: 'email',       sort: 'email',               label: 'Email' },
+  { key: 'validated',   sort: 'validated',           label: 'Validated' },
+  { key: 'status',      sort: null,                  label: 'Status' },
+  { key: 'checkinTime', sort: null,                  label: 'Check-In Time' },
+  { key: 'note',        sort: 'note',               label: 'Note' },
 ]
+
+// note and checkinTime are off by default — too wide for most workflows
+const DEFAULT_VISIBLE_KEYS = new Set(
+  COLUMNS.filter(c => c.key !== 'note' && c.key !== 'checkinTime').map(c => c.key)
+)
+
+function loadVisibleColumns() {
+  try {
+    const stored = localStorage.getItem('agm_competitors_columns')
+    if (stored) {
+      const arr = JSON.parse(stored)
+      if (Array.isArray(arr) && arr.length > 0) return new Set(arr)
+    }
+  } catch {}
+  return new Set(DEFAULT_VISIBLE_KEYS)
+}
 
 function descendingComparator(a, b, orderBy) {
   const aVal = a[orderBy] ?? ''
@@ -109,6 +135,13 @@ export default function CompetitorsPage() {
   const [editTarget, setEditTarget] = useState(null)
   const [addOpen, setAddOpen] = useState(false)
 
+  // Column visibility — persisted in localStorage
+  const [visibleColumns, setVisibleColumns] = useState(loadVisibleColumns)
+  const [columnsAnchor, setColumnsAnchor] = useState(null)
+
+  // Event filter — null means all events shown
+  const [eventFilter, setEventFilter] = useState(null)
+
   const fetchCompetitors = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -126,10 +159,39 @@ export default function CompetitorsPage() {
     fetchCompetitors()
   }, [fetchCompetitors])
 
-  const handleSort = (column) => {
-    const isAsc = orderBy === column && order === 'asc'
+  // Derive which event IDs are present in the loaded data, in chronological order
+  const availableEvents = useMemo(() => {
+    const found = new Set(competitors.map(c => c.lastRegisteredEvent).filter(Boolean))
+    return EVENT_ORDER.filter(e => found.has(e))
+  }, [competitors])
+
+  const handleSort = (sortField) => {
+    const isAsc = orderBy === sortField && order === 'asc'
     setOrder(isAsc ? 'desc' : 'asc')
-    setOrderBy(column)
+    setOrderBy(sortField)
+  }
+
+  const toggleColumn = (key) => {
+    setVisibleColumns(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        if (next.size === 1) return prev // always keep at least one column
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      localStorage.setItem('agm_competitors_columns', JSON.stringify([...next]))
+      return next
+    })
+  }
+
+  const toggleEvent = (eventId) => {
+    const current = eventFilter ?? new Set(availableEvents)
+    const next = new Set(current)
+    if (next.has(eventId)) next.delete(eventId)
+    else next.add(eventId)
+    // Normalize: if all events are selected, store null (no filter active)
+    setEventFilter(next.size === availableEvents.length ? null : next)
   }
 
   const updateLocalCompetitor = (updated) => {
@@ -184,6 +246,13 @@ export default function CompetitorsPage() {
 
   const sorted = [...competitors].sort(getComparator(order, orderBy))
 
+  // Apply event filter
+  const displayed = eventFilter === null
+    ? sorted
+    : sorted.filter(c => eventFilter.has(c.lastRegisteredEvent))
+
+  const vis = (key) => visibleColumns.has(key)
+
   return (
     <Box sx={{ mt: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -194,20 +263,73 @@ export default function CompetitorsPage() {
           </Button>
         )}
       </Box>
+
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
+
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
           <CircularProgress />
         </Box>
       ) : (
         <>
+          {/* Toolbar: event filter (all breakpoints) + Columns button (desktop only) */}
+          {availableEvents.length > 1 && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                <Typography variant="body2" color="text.secondary" sx={{ mr: 0.5 }}>
+                  Event:
+                </Typography>
+                <FormGroup row>
+                  {availableEvents.map(eventId => (
+                    <FormControlLabel
+                      key={eventId}
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={eventFilter === null || eventFilter.has(eventId)}
+                          onChange={() => toggleEvent(eventId)}
+                        />
+                      }
+                      label={<Typography variant="body2">{eventId}</Typography>}
+                      sx={{ mr: 1.5 }}
+                    />
+                  ))}
+                </FormGroup>
+              </Box>
+              <Box sx={{ ml: 'auto', display: { xs: 'none', md: 'block' } }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ViewColumnIcon />}
+                  onClick={e => setColumnsAnchor(e.currentTarget)}
+                >
+                  Columns
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {/* Show Columns button even when there's only one event */}
+          {availableEvents.length <= 1 && (
+            <Box sx={{ display: { xs: 'none', md: 'flex' }, justifyContent: 'flex-end', mb: 2 }}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<ViewColumnIcon />}
+                onClick={e => setColumnsAnchor(e.currentTarget)}
+              >
+                Columns
+              </Button>
+            </Box>
+          )}
+
           {/* Mobile card list */}
           <Box sx={{ display: { xs: 'flex', md: 'none' }, flexDirection: 'column', gap: 1.5 }}>
-            {sorted.map(competitor => {
+            {displayed.map(competitor => {
               const age = calculateAge(competitor.dateOfBirth)
               const dob = formatDOB(competitor.dateOfBirth)
               return (
@@ -235,13 +357,12 @@ export default function CompetitorsPage() {
                         color={isCheckedIn(competitor) ? 'success' : 'default'}
                         size="small"
                       />
-                      {competitor.requiresValidation && (
-                        competitor.validated ? (
+                      {competitor.validated ? (
                           <Chip icon={<CheckCircleOutlineIcon />} label="Validated" color="success" size="small" variant="outlined" />
                         ) : (
                           <Chip icon={<WarningAmberIcon />} label="Validate" color="warning" size="small" variant="outlined" />
                         )
-                      )}
+                      }
                     </Box>
                   </Box>
                   <Divider sx={{ my: 1 }} />
@@ -284,77 +405,116 @@ export default function CompetitorsPage() {
 
           {/* Desktop table */}
           <TableContainer component={Paper} sx={{ borderRadius: 2, display: { xs: 'none', md: 'block' } }}>
-            <Table>
+            <Table
+              size="small"
+              sx={{
+                '& td, & th': { fontSize: '0.78rem', px: 1.25, py: 0.6 },
+                '& td:nth-of-type(even), & th:nth-of-type(even)': {
+                  bgcolor: 'action.hover',
+                },
+              }}
+            >
               <TableHead>
                 <TableRow sx={{ '& th': { fontWeight: 600 } }}>
-                  {columns.map(col => (
-                    <TableCell key={col.id}>
-                      <TableSortLabel
-                        active={orderBy === col.id}
-                        direction={orderBy === col.id ? order : 'asc'}
-                        onClick={() => handleSort(col.id)}
-                      >
-                        {col.label}
-                      </TableSortLabel>
+                  {COLUMNS.map(col => vis(col.key) && (
+                    <TableCell key={col.key}>
+                      {col.sort ? (
+                        <TableSortLabel
+                          active={orderBy === col.sort}
+                          direction={orderBy === col.sort ? order : 'asc'}
+                          onClick={() => handleSort(col.sort)}
+                        >
+                          {col.label}
+                        </TableSortLabel>
+                      ) : col.label}
                     </TableCell>
                   ))}
                   <TableCell>Action</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {sorted.map(competitor => {
+                {displayed.map(competitor => {
                   const age = calculateAge(competitor.dateOfBirth)
                   const dob = formatDOB(competitor.dateOfBirth)
                   return (
                     <TableRow key={competitor.id} hover>
-                      <TableCell>{competitor.nameFirst} {competitor.nameLast}</TableCell>
-                      <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                        {competitor.lastRegisteredEvent || '—'}
-                      </TableCell>
-                      <TableCell>{competitor.studio || '—'}</TableCell>
-                      <TableCell>{competitor.teacher || '—'}</TableCell>
-                      <TableCell>{competitor.shirtSize || '—'}</TableCell>
-                      <TableCell>
-                        <Typography variant="body2">{dob || '—'}</Typography>
-                        {age !== null && (
-                          <Typography variant="caption" color="text.secondary">{age} yrs</Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>{competitor.email || '—'}</TableCell>
-                      <TableCell>
-                        {competitor.requiresValidation ? (
-                          competitor.validated ? (
+                      {vis('name') && (
+                        <TableCell>{competitor.nameFirst} {competitor.nameLast}</TableCell>
+                      )}
+                      {vis('event') && (
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                          {competitor.lastRegisteredEvent || '—'}
+                        </TableCell>
+                      )}
+                      {vis('studio') && (
+                        <TableCell>{competitor.studio || '—'}</TableCell>
+                      )}
+                      {vis('teacher') && (
+                        <TableCell>{competitor.teacher || '—'}</TableCell>
+                      )}
+                      {vis('shirt') && (
+                        <TableCell>{competitor.shirtSize || '—'}</TableCell>
+                      )}
+                      {vis('dob') && (
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          {dob
+                            ? `${dob}${age !== null ? ` · ${age} yrs` : ''}`
+                            : '—'
+                          }
+                        </TableCell>
+                      )}
+                      {vis('email') && (
+                        <TableCell>{competitor.email || '—'}</TableCell>
+                      )}
+                      {vis('validated') && (
+                        <TableCell>
+                          {competitor.validated ? (
                             <Tooltip title="Validated">
                               <CheckCircleOutlineIcon fontSize="small" color="success" />
                             </Tooltip>
-                          ) : (
+                          ) : competitor.requiresValidation ? (
                             <Tooltip title="Requires validation">
                               <WarningAmberIcon fontSize="small" color="warning" />
                             </Tooltip>
-                          )
-                        ) : (
-                          <Typography variant="body2" color="text.disabled">—</Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={isCheckedIn(competitor) ? 'Checked In' : 'Pending'}
-                          color={isCheckedIn(competitor) ? 'success' : 'default'}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {competitor.currentCheckIn?.checkInDatetime ? (
-                          <>
-                            {new Date(competitor.currentCheckIn.checkInDatetime).toLocaleString()}
-                            {competitor.currentCheckIn.checkedInBy && (
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                {competitor.currentCheckIn.checkedInBy}
+                          ) : (
+                            <Typography variant="body2" color="text.disabled">—</Typography>
+                          )}
+                        </TableCell>
+                      )}
+                      {vis('status') && (
+                        <TableCell>
+                          <Chip
+                            label={isCheckedIn(competitor) ? 'Checked In' : 'Pending'}
+                            color={isCheckedIn(competitor) ? 'success' : 'default'}
+                            size="small"
+                          />
+                        </TableCell>
+                      )}
+                      {vis('checkinTime') && (
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          {competitor.currentCheckIn?.checkInDatetime ? (
+                            <>
+                              {new Date(competitor.currentCheckIn.checkInDatetime).toLocaleString()}
+                              {competitor.currentCheckIn.checkedInBy && (
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                  {competitor.currentCheckIn.checkedInBy}
+                                </Typography>
+                              )}
+                            </>
+                          ) : '—'}
+                        </TableCell>
+                      )}
+                      {vis('note') && (
+                        <TableCell sx={{ maxWidth: 200 }}>
+                          {competitor.note ? (
+                            <Tooltip title={competitor.note} placement="top">
+                              <Typography variant="body2" noWrap sx={{ maxWidth: 190 }}>
+                                {competitor.note}
                               </Typography>
-                            )}
-                          </>
-                        ) : '—'}
-                      </TableCell>
+                            </Tooltip>
+                          ) : <Typography variant="body2" color="text.disabled">—</Typography>}
+                        </TableCell>
+                      )}
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                           {!isCheckedIn(competitor) && (
@@ -382,6 +542,34 @@ export default function CompetitorsPage() {
           </TableContainer>
         </>
       )}
+
+      {/* Column visibility popover */}
+      <Popover
+        open={Boolean(columnsAnchor)}
+        anchorEl={columnsAnchor}
+        onClose={() => setColumnsAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Box sx={{ p: 2, minWidth: 180 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Show columns</Typography>
+          <FormGroup>
+            {COLUMNS.map(col => (
+              <FormControlLabel
+                key={col.key}
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={vis(col.key)}
+                    onChange={() => toggleColumn(col.key)}
+                  />
+                }
+                label={<Typography variant="body2">{col.label}</Typography>}
+              />
+            ))}
+          </FormGroup>
+        </Box>
+      </Popover>
 
       <AddCompetitorDialog
         open={addOpen}

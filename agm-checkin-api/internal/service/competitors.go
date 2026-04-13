@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -9,6 +11,169 @@ import (
 
 	"johndpete316/agm-checkin-api/internal/db"
 )
+
+// ImportRow represents one row from a normalized import CSV.
+type ImportRow struct {
+	NameFirst          string
+	NameLast           string
+	Studio             string
+	Teacher            string
+	Email              string
+	ShirtSize          string
+	DateOfBirth        *time.Time // nil if unknown
+	RequiresValidation bool
+	Validated          bool
+	Events             []string // event IDs sorted oldest→newest, e.g. ["nat-2024","glr-2026"]
+}
+
+// ImportResult summarises what was inserted during a BulkImport call.
+type ImportResult struct {
+	CompetitorsCreated int      `json:"competitorsCreated"`
+	EventsCreated      int      `json:"eventsCreated"`
+	EventEntriesAdded  int      `json:"eventEntriesAdded"`
+	Errors             []string `json:"errors,omitempty"`
+}
+
+// eventOrder is the canonical chronological order for determining LastRegisteredEvent.
+var eventOrder = []string{"nat-2024", "glr-2025", "nat-2025", "glr-2026"}
+
+func eventRank(id string) int {
+	for i, e := range eventOrder {
+		if e == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// mostRecentEvent returns the most recent event ID from a list according to the canonical order.
+// Unknown event IDs are ranked last so they don't displace known ones.
+func mostRecentEvent(events []string) string {
+	best := ""
+	bestRank := -2
+	for _, e := range events {
+		r := eventRank(e)
+		if r == -1 {
+			r = len(eventOrder) // treat unknown as after all known
+		}
+		if r > bestRank {
+			bestRank = r
+			best = e
+		}
+	}
+	return best
+}
+
+// BulkImport creates Postgres snapshot backup tables, then inserts all competitors and their
+// event registrations. Stub event records are auto-created for any event ID not yet in the DB.
+// The operation is designed for an empty database; re-running on a populated DB will
+// produce duplicate competitors since there is no unique constraint on (name, studio).
+func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) {
+	result := &ImportResult{}
+
+	// --- 1. Backup existing tables so the import can be rolled back if needed. ---
+	ts := time.Now().Unix()
+	backupSQL := fmt.Sprintf(`
+		CREATE TABLE competitors_backup_%d AS SELECT * FROM competitors;
+		CREATE TABLE competitor_events_backup_%d AS SELECT * FROM competitor_events;
+	`, ts, ts)
+	if err := s.db.Exec(backupSQL).Error; err != nil {
+		return nil, fmt.Errorf("creating backup tables: %w", err)
+	}
+
+	// --- 2. Collect all referenced event IDs and auto-create stubs for missing ones. ---
+	eventSet := map[string]bool{}
+	for _, row := range rows {
+		for _, eid := range row.Events {
+			eventSet[eid] = true
+		}
+	}
+	for eid := range eventSet {
+		var existing db.Event
+		if err := s.db.First(&existing, "id = ?", eid).Error; err != nil {
+			// Event doesn't exist — create a stub. Dates are left as zero; admin fills them in later.
+			name := eventDisplayName(eid)
+			stub := db.Event{ID: eid, Name: name}
+			if err := s.db.Create(&stub).Error; err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("create event %s: %v", eid, err))
+				continue
+			}
+			result.EventsCreated++
+		}
+	}
+
+	// --- 3. Bulk-insert all competitors. ---
+	competitors := make([]db.Competitor, 0, len(rows))
+	for _, row := range rows {
+		dob := time.Time{}
+		if row.DateOfBirth != nil {
+			dob = *row.DateOfBirth
+		}
+		c := db.Competitor{
+			NameFirst:           strings.TrimSpace(row.NameFirst),
+			NameLast:            strings.TrimSpace(row.NameLast),
+			Studio:              row.Studio,
+			Teacher:             row.Teacher,
+			Email:               row.Email,
+			ShirtSize:           row.ShirtSize,
+			DateOfBirth:         dob,
+			RequiresValidation:  row.RequiresValidation,
+			Validated:           row.Validated,
+			LastRegisteredEvent: mostRecentEvent(row.Events),
+		}
+		competitors = append(competitors, c)
+	}
+
+	if len(competitors) > 0 {
+		if err := s.db.Create(&competitors).Error; err != nil {
+			return nil, fmt.Errorf("bulk inserting competitors: %w", err)
+		}
+		result.CompetitorsCreated = len(competitors)
+	}
+
+	// --- 4. Bulk-insert CompetitorEvent rows (one per competitor × event). ---
+	var ces []db.CompetitorEvent
+	for i, row := range rows {
+		for _, eid := range row.Events {
+			if _, exists := eventSet[eid]; !exists {
+				continue // event creation failed; skip
+			}
+			ces = append(ces, db.CompetitorEvent{
+				CompetitorID: competitors[i].ID,
+				EventID:      eid,
+				CheckedIn:    false,
+			})
+		}
+	}
+
+	if len(ces) > 0 {
+		// ON CONFLICT DO NOTHING — safe to re-run if partially completed.
+		if err := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&ces).Error; err != nil {
+			return nil, fmt.Errorf("bulk inserting competitor events: %w", err)
+		}
+		result.EventEntriesAdded = len(ces)
+	}
+
+	return result, nil
+}
+
+// eventDisplayName converts an event slug into a human-readable name for stub events.
+func eventDisplayName(id string) string {
+	parts := strings.SplitN(id, "-", 2)
+	if len(parts) != 2 {
+		return id
+	}
+	prefix := strings.ToUpper(parts[0])
+	year := parts[1]
+	switch prefix {
+	case "GLR":
+		return "GLR " + year
+	case "NAT":
+		return "Nationals " + year
+	default:
+		return prefix + " " + year
+	}
+}
 
 // CompetitorWithCheckIn is the standard list/detail response — the competitor record
 // plus their check-in record for the current event (nil if not yet checked in).

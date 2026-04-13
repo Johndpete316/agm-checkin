@@ -30,6 +30,7 @@ const adminNavLinks = [
   { label: 'Events', path: '/events' },
   { label: 'Manage Users', path: '/manage-users' },
   { label: 'Audit Log', path: '/audit' },
+  { label: 'Import Data', path: '/import' },
 ]
 
 export default function NavBar() {

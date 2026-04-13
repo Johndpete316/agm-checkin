@@ -113,7 +113,7 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
                     variant="outlined"
                   />
                 )}
-                {competitor.validated && competitor.requiresValidation && (
+                {competitor.validated && (
                   <Chip
                     icon={<CheckCircleOutlineIcon fontSize="small" />}
                     label="Validated"

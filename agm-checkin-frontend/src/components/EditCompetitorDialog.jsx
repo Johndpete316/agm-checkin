@@ -13,9 +13,18 @@ import FormControlLabel from '@mui/material/FormControlLabel'
 import Switch from '@mui/material/Switch'
 import Box from '@mui/material/Box'
 import Alert from '@mui/material/Alert'
-import { updateCompetitor } from '../api/competitors'
+import Divider from '@mui/material/Divider'
+import Typography from '@mui/material/Typography'
+import Table from '@mui/material/Table'
+import TableBody from '@mui/material/TableBody'
+import TableCell from '@mui/material/TableCell'
+import TableHead from '@mui/material/TableHead'
+import TableRow from '@mui/material/TableRow'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
+import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline'
+import { updateCompetitor, getCompetitorEvents } from '../api/competitors'
 
-const SHIRT_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
+const SHIRT_SIZES = ['Adult XL', 'Adult L', 'Adult M', 'Adult S', 'Youth XL', 'Youth L', 'Youth M', 'Youth S']
 const EVENTS = ['glr-2026', 'nat-2025', 'glr-2025', 'nat-2024']
 
 function toInputDate(iso) {
@@ -33,6 +42,7 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [eventHistory, setEventHistory] = useState([])
 
   useEffect(() => {
     if (!competitor) return
@@ -50,6 +60,10 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
       note: competitor.note ?? '',
     })
     setError('')
+    setEventHistory([])
+    getCompetitorEvents(competitor.id)
+      .then(setEventHistory)
+      .catch(() => {}) // non-critical — form still works without history
   }, [competitor])
 
   function set(field, value) {
@@ -184,6 +198,50 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
           </Box>
 
           {error && <Alert severity="error">{error}</Alert>}
+
+          {/* Event history */}
+          {eventHistory.length > 0 && (
+            <>
+              <Divider />
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Event History</Typography>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow sx={{ '& th': { fontWeight: 600 } }}>
+                      <TableCell>Event</TableCell>
+                      <TableCell>Checked In</TableCell>
+                      <TableCell>Check-In Time</TableCell>
+                      <TableCell>By</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {eventHistory.map(ev => (
+                      <TableRow key={ev.eventId ?? ev.id}>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                          {ev.eventId}
+                        </TableCell>
+                        <TableCell>
+                          {ev.checkedIn
+                            ? <CheckCircleOutlineIcon fontSize="small" color="success" />
+                            : <RemoveCircleOutlineIcon fontSize="small" color="disabled" />
+                          }
+                        </TableCell>
+                        <TableCell>
+                          {ev.checkInDatetime
+                            ? new Date(ev.checkInDatetime).toLocaleString()
+                            : <Typography variant="body2" color="text.disabled">—</Typography>
+                          }
+                        </TableCell>
+                        <TableCell>
+                          {ev.checkedInBy || <Typography variant="body2" color="text.disabled">—</Typography>}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
+            </>
+          )}
         </Box>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
