@@ -67,7 +67,12 @@ func main() {
 		r.Use(authmw.RequireToken(authSvc))
 
 		r.Get("/api/auth/me", func(w http.ResponseWriter, r *http.Request) {
-			respondJSON(w, http.StatusOK, authmw.StaffFromContext(r.Context()))
+			staff := authmw.StaffFromContext(r.Context())
+			if staff == nil {
+				respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
+			respondJSON(w, http.StatusOK, staff.ToView())
 		})
 
 		r.Get("/api/competitors", listCompetitors(competitorSvc))
@@ -450,7 +455,11 @@ func listStaff(svc *service.StaffService) http.HandlerFunc {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		respondJSON(w, http.StatusOK, tokens)
+		views := make([]db.StaffView, len(tokens))
+		for i := range tokens {
+			views[i] = tokens[i].ToView()
+		}
+		respondJSON(w, http.StatusOK, views)
 	}
 }
 
