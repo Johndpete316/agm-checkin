@@ -9,8 +9,8 @@ export function useAuth() {
 }
 
 function getStoredAuth() {
-  const token = sessionStorage.getItem('agm_token')
-  const raw = sessionStorage.getItem('agm_staff')
+  const token = localStorage.getItem('agm_token')
+  const raw = localStorage.getItem('agm_staff')
   if (token && raw) {
     try {
       return { token, staff: JSON.parse(raw) }
@@ -26,14 +26,14 @@ export function AuthProvider({ children }) {
 
   function login(token, firstName, lastName, role = 'registration') {
     const staff = { firstName, lastName, role }
-    sessionStorage.setItem('agm_token', token)
-    sessionStorage.setItem('agm_staff', JSON.stringify(staff))
+    localStorage.setItem('agm_token', token)
+    localStorage.setItem('agm_staff', JSON.stringify(staff))
     setAuth({ token, staff })
   }
 
   function logout() {
-    sessionStorage.removeItem('agm_token')
-    sessionStorage.removeItem('agm_staff')
+    localStorage.removeItem('agm_token')
+    localStorage.removeItem('agm_staff')
     setAuth(null)
   }
 
@@ -49,15 +49,15 @@ export function AuthProvider({ children }) {
         })
         if (res.status === 401) {
           // Token has been revoked — force logout
-          sessionStorage.removeItem('agm_token')
-          sessionStorage.removeItem('agm_staff')
+          localStorage.removeItem('agm_token')
+          localStorage.removeItem('agm_staff')
           setAuth(null)
           return
         }
         if (!res.ok) return
         const data = await res.json()
         const updatedStaff = { ...stored.staff, role: data.role }
-        sessionStorage.setItem('agm_staff', JSON.stringify(updatedStaff))
+        localStorage.setItem('agm_staff', JSON.stringify(updatedStaff))
         setAuth({ token: stored.token, staff: updatedStaff })
       } catch {
         // Network error — leave existing auth state alone

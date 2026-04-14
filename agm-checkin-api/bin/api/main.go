@@ -66,20 +66,8 @@ func main() {
 	database := db.Connect(dsn)
 	db.AutoMigrate(database)
 
-	// TOKEN_TTL sets how long bearer tokens remain valid (e.g. "48h", "24h").
-	// Defaults to 48 hours.  Set to "0" to disable expiry (not recommended).
-	// See Finding 6 of the security review.
-	tokenTTL := 48 * time.Hour
-	if ttlStr := os.Getenv("TOKEN_TTL"); ttlStr != "" {
-		if d, err := time.ParseDuration(ttlStr); err != nil {
-			log.Fatalf("invalid TOKEN_TTL value %q: %v", ttlStr, err)
-		} else {
-			tokenTTL = d
-		}
-	}
-
 	competitorSvc := service.NewCompetitorService(database)
-	authSvc := service.NewAuthService(database, pin, tokenTTL)
+	authSvc := service.NewAuthService(database, pin)
 	staffSvc := service.NewStaffService(database)
 	eventSvc := service.NewEventService(database)
 	auditSvc := service.NewAuditService(database)
@@ -89,14 +77,7 @@ func main() {
 
 	allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
 	if allowedOrigin == "" {
-		// Default to wildcard so existing deployments keep working, but warn
-		// loudly because a wildcard CORS policy reduces defence-in-depth.
-		// Set ALLOWED_ORIGIN to your frontend's exact origin in production
-		// (e.g. https://checkin.example.com).  See Finding 5 of the security
-		// review for details.
-		allowedOrigin = "*"
-		log.Println("WARNING: ALLOWED_ORIGIN not set; CORS policy allows any origin ('*')." +
-			" Set ALLOWED_ORIGIN=https://your-frontend.example.com in production.")
+		log.Fatal("no allowed origin set, please set an allowed origin with ALLOWED_ORIGIN environment variable.")
 	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{allowedOrigin},
@@ -141,7 +122,9 @@ func main() {
 		r.Get("/api/competitors/{id}", getCompetitor(competitorSvc))
 		r.Post("/api/competitors", createCompetitor(competitorSvc, auditSvc))
 		r.Patch("/api/competitors/{id}/checkin", checkInCompetitor(competitorSvc, auditSvc))
+		r.Patch("/api/competitors/{id}/dob", updateDOB(competitorSvc, auditSvc))
 		r.Patch("/api/competitors/{id}/validate", validateCompetitor(competitorSvc, auditSvc))
+		r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc, auditSvc))
 		r.Get("/api/competitors/{id}/events", getCompetitorEvents(competitorSvc))
 
 		r.Get("/api/events", listEvents(eventSvc))
@@ -150,10 +133,6 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.RequireAdmin)
 			r.Patch("/api/competitors/{id}", updateCompetitor(competitorSvc, auditSvc))
-			// DELETE and PATCH /dob are destructive/safety-sensitive; admin-only.
-			// See Finding 7 of the security review.
-			r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc, auditSvc))
-			r.Patch("/api/competitors/{id}/dob", updateDOB(competitorSvc, auditSvc))
 
 			r.Post("/api/events", createEvent(eventSvc, auditSvc))
 			r.Patch("/api/events/{id}/current", setCurrentEvent(eventSvc, auditSvc))
@@ -165,9 +144,6 @@ func main() {
 			r.Get("/api/audit", listAudit(auditSvc))
 
 			r.Post("/api/competitors/import", bulkImportCompetitors(competitorSvc, auditSvc))
-
-			// Admin IP-blocklist management (Finding 4: unblock path).
-			r.Delete("/api/blocklist/{ip}", unblockIP(authSvc, auditSvc))
 		})
 	})
 
@@ -258,44 +234,10 @@ func getCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 
 func createCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Use an explicit input struct that excludes security-sensitive fields
-		// (RequiresValidation, Validated) so callers cannot set them at creation
-		// time regardless of role. Those fields are managed by dedicated endpoints:
-		// PATCH /validate (any auth'd staff) and PATCH /{id} (admin-only).
-		var input struct {
-			NameFirst           string `json:"nameFirst"`
-			NameLast            string `json:"nameLast"`
-			DateOfBirth         string `json:"dateOfBirth"`
-			ShirtSize           string `json:"shirtSize"`
-			Email               string `json:"email"`
-			Teacher             string `json:"teacher"`
-			Studio              string `json:"studio"`
-			LastRegisteredEvent string `json:"lastRegisteredEvent"`
-			Note                string `json:"note"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		var competitor db.Competitor
+		if err := json.NewDecoder(r.Body).Decode(&competitor); err != nil {
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
-		}
-		competitor := db.Competitor{
-			NameFirst:           input.NameFirst,
-			NameLast:            input.NameLast,
-			ShirtSize:           input.ShirtSize,
-			Email:               input.Email,
-			Teacher:             input.Teacher,
-			Studio:              input.Studio,
-			LastRegisteredEvent: input.LastRegisteredEvent,
-			Note:                input.Note,
-			// RequiresValidation and Validated intentionally omitted:
-			// they default to false and can only be set by authorised operations.
-		}
-		if input.DateOfBirth != "" {
-			dob, err := time.Parse(time.RFC3339, input.DateOfBirth)
-			if err != nil {
-				respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid dateOfBirth format; use RFC 3339"})
-				return
-			}
-			competitor.DateOfBirth = dob
 		}
 		if err := svc.Create(&competitor); err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -654,22 +596,11 @@ func revokeStaff(svc *service.StaffService, audit *service.AuditService) http.Ha
 	}
 }
 
-const (
-	auditDefaultLimit = 100
-	auditMaxLimit     = 500
-)
-
 func listAudit(svc *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		action := r.URL.Query().Get("action")
 		actorName := r.URL.Query().Get("actor")
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-		// Cap the limit to prevent unbounded result sets (Finding 9).
-		if limit <= 0 {
-			limit = auditDefaultLimit
-		} else if limit > auditMaxLimit {
-			limit = auditMaxLimit
-		}
 		logs, err := svc.List(action, actorName, limit)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -814,31 +745,4 @@ func parseImportCSV(r io.Reader) ([]service.ImportRow, []string) {
 	}
 
 	return rows, errs
-}
-
-// unblockIP removes an IP from the blocklist and clears its PIN attempts,
-// giving the address an immediate clean slate. Admin-only.
-func unblockIP(authSvc *service.AuthService, audit *service.AuditService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ip := chi.URLParam(r, "ip")
-		if ip == "" {
-			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "ip is required"})
-			return
-		}
-		if err := authSvc.UnblockIP(ip); err != nil {
-			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		actorID, actorName := actorFrom(r)
-		audit.Log(service.LogEntry{
-			ActorID:    actorID,
-			ActorName:  actorName,
-			Action:     "blocklist.removed",
-			EntityType: "ip",
-			EntityID:   ip,
-			EntityName: ip,
-			IP:         authmw.ClientIP(r),
-		})
-		w.WriteHeader(http.StatusNoContent)
-	}
 }

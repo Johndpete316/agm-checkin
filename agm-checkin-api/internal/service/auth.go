@@ -13,14 +13,7 @@ import (
 	"johndpete316/agm-checkin-api/internal/db"
 )
 
-const (
-	maxPINAttempts = 3
-	// pinAttemptWindow is the rolling window within which failed PIN attempts are
-	// counted against the per-IP limit.  Attempts older than this are ignored,
-	// which means a blocked IP automatically becomes unblocked after the window
-	// expires — preventing the permanent-block DoS described in Finding 4.
-	pinAttemptWindow = 15 * time.Minute
-)
+const maxPINAttempts = 3
 
 var (
 	ErrIPBlocked       = errors.New("ip address is blocked")
@@ -29,33 +22,18 @@ var (
 )
 
 type AuthService struct {
-	db     *gorm.DB
-	pin    string
-	tokenTTL time.Duration // 0 means no expiry (legacy / backwards-compat)
+	db  *gorm.DB
+	pin string
 }
 
-// NewAuthService creates an AuthService. tokenTTL sets how long issued tokens
-// remain valid; pass 0 to disable expiry (not recommended for production).
-func NewAuthService(database *gorm.DB, pin string, tokenTTL time.Duration) *AuthService {
-	return &AuthService{db: database, pin: pin, tokenTTL: tokenTTL}
+func NewAuthService(database *gorm.DB, pin string) *AuthService {
+	return &AuthService{db: database, pin: pin}
 }
 
 func (s *AuthService) IsIPBlocked(ip string) bool {
 	var count int64
 	s.db.Model(&db.IPBlocklist{}).Where("ip_address = ?", ip).Count(&count)
 	return count > 0
-}
-
-// UnblockIP removes the given IP from the blocklist and deletes its recorded
-// PIN attempts so it may immediately attempt login again.
-// This is the admin-facing recovery path for Finding 4 (permanent-block DoS).
-func (s *AuthService) UnblockIP(ip string) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("ip_address = ?", ip).Delete(&db.IPBlocklist{}).Error; err != nil {
-			return err
-		}
-		return tx.Where("ip_address = ?", ip).Delete(&db.PINAttempt{}).Error
-	})
 }
 
 // VerifyPINAndCreateToken validates the PIN against the configured value,
@@ -79,13 +57,8 @@ func (s *AuthService) VerifyPINAndCreateToken(ip, pin, firstName, lastName strin
 			return err
 		}
 
-		// Only count attempts within the rolling window (Finding 4: time-bounded
-		// lockout so an IP does not stay blocked forever due to old attempts).
-		windowStart := time.Now().Add(-pinAttemptWindow)
 		var attemptCount int64
-		if err := tx.Model(&db.PINAttempt{}).
-			Where("ip_address = ? AND attempted_at > ?", ip, windowStart).
-			Count(&attemptCount).Error; err != nil {
+		if err := tx.Model(&db.PINAttempt{}).Where("ip_address = ?", ip).Count(&attemptCount).Error; err != nil {
 			return err
 		}
 
@@ -126,10 +99,6 @@ func (s *AuthService) VerifyPINAndCreateToken(ip, pin, firstName, lastName strin
 			LastName:  lastName,
 			CreatedAt: time.Now(),
 		}
-		if s.tokenTTL > 0 {
-			exp := t.CreatedAt.Add(s.tokenTTL)
-			t.ExpiresAt = &exp
-		}
 
 		if err := tx.Create(t).Error; err != nil {
 			return err
@@ -163,10 +132,6 @@ func (s *AuthService) ValidateToken(token string) (*db.StaffToken, bool) {
 		return nil, false
 	}
 	if subtle.ConstantTimeCompare([]byte(staffToken.Token), []byte(token)) != 1 {
-		return nil, false
-	}
-	// Enforce token expiry (Finding 6): reject tokens whose ExpiresAt has passed.
-	if staffToken.ExpiresAt != nil && time.Now().After(*staffToken.ExpiresAt) {
 		return nil, false
 	}
 	return &staffToken, true

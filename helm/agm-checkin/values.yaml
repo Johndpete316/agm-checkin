@@ -7,6 +7,7 @@ api:
   image: agm-api
   tag: latest
   allowedOrigin: "https://checkin.reduxit.net"
+  trustedProxy: "cloudflare"  # "cloudflare" (production via CF Tunnel) or "direct" (local dev, no proxy)
   authPin: ""  # Do not put the real PIN here — use values.secret.yaml instead
 
 frontend:
