@@ -32,6 +32,8 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-api-secret
                   key: authPin
+            - name: TRUSTED_PROXY
+              value: {{ .Values.api.trustedProxy | quote }}
           readinessProbe:
             httpGet:
               path: /health

@@ -51,7 +51,8 @@ VALUES ('glr-2026', 'GLR 2026', '2026-03-14', '2026-03-16', true);
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | Standard PostgreSQL DSN |
 | `AUTH_PIN` | Yes | Access code for staff login (stored plaintext in env, compared with constant-time compare) |
-| `ALLOWED_ORIGIN` | No | CORS allowed origin (defaults to `*`) |
+| `ALLOWED_ORIGIN` | Yes | CORS allowed origin; startup fatal if unset |
+| `TRUSTED_PROXY` | No | IP header trust mode: `cloudflare` (default, for CF Tunnel) or `direct` (local dev, no proxy) |
 
 ### Structure
 
