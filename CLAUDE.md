@@ -302,3 +302,12 @@ pgadmin:
 ```
 
 See `DEPLOYMENT.md` for full infrastructure details.
+
+## Test Generation Agent
+
+When asked to generate tests:
+1. Enumerate all public funcs in the target package
+2. Generate _test.go files per the project test conventions
+3. Run `go test -race ./...` and fix all failures
+4. Run `go vet ./...` and fix all warnings
+5. Do not stop until exit code 0 on both commands
