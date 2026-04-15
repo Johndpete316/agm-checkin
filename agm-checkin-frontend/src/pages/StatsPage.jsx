@@ -97,7 +97,9 @@ export default function StatsPage() {
   }, [fetchData])
 
   // Only count competitors registered for the current event
-  const current = competitors.filter(c => c.currentCheckIn !== null && c.currentCheckIn !== undefined)
+  const current = currentEvent
+    ? competitors.filter(c => c.lastRegisteredEvent === currentEvent.id)
+    : []
 
   const total = current.length
   const checkedIn = current.filter(c => c.currentCheckIn?.checkedIn).length
