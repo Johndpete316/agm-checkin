@@ -92,6 +92,12 @@ The `staff.js` module does not use `apiFetch` — it accepts the token as a para
 **API call:** `PATCH /api/competitors/{id}/validate` (no body)  
 **Returns:** `Competitor`
 
+### `updateCompetitorContact(id, data)`
+
+**API call:** `PATCH /api/competitors/{id}/contact` with JSON body  
+**Body:** `{ note?: string, email?: string }` — both fields are optional; only sent fields are updated  
+**Returns:** `Competitor` (updated record)
+
 ### `updateCompetitor(id, data)`
 
 **API call:** `PATCH /api/competitors/{id}` with JSON body  

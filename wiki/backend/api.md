@@ -169,6 +169,29 @@ A globally applied `IPBlocklist` middleware blocks all endpoints for IPs that ha
 
 ---
 
+### PATCH /api/competitors/{id}/contact
+
+**Auth:** Bearer  
+**Handler:** `updateCompetitorContact` in `main.go`  
+**Service:** [`CompetitorService.UpdateContact`](services.md#competitorservice)  
+**Description:** Update a competitor's `note` and/or `email`. Available to all authenticated staff (registration and admin). Both fields are optional — only fields present in the request body are updated. To clear a field, send an empty string.
+
+**Path params:** `id` — competitor UUID
+
+**Request body:**
+```json
+{
+  "note": "string (optional)",
+  "email": "string (optional)"
+}
+```
+
+**Audit log:** `competitor.contact_updated`
+
+**Response `200 OK`:** The updated [`Competitor`](database.md#competitor) object.
+
+---
+
 ### PATCH /api/competitors/{id}/dob
 
 **Auth:** Bearer  
@@ -447,6 +470,7 @@ Valid values: `"admin"`, `"registration"`.
 | `competitor.deleted` | `DELETE /api/competitors/{id}` |
 | `competitor.checked_in` | `PATCH /api/competitors/{id}/checkin` |
 | `competitor.dob_updated` | `PATCH /api/competitors/{id}/dob` |
+| `competitor.contact_updated` | `PATCH /api/competitors/{id}/contact` |
 | `competitor.validated` | `PATCH /api/competitors/{id}/validate` |
 | `competitor.bulk_import` | `POST /api/competitors/import` |
 | `event.created` | `POST /api/events` |

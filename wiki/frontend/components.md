@@ -51,7 +51,7 @@ Displays `src/assets/agm-125th-logo.png` at 36px height in the toolbar.
 **File:** `src/components/CompetitorCard.jsx`  
 **Used by:** `CheckInPage`
 
-**Purpose:** Card UI for a single competitor result on the Check-In page. Shows key details and a Check In button. Handles the identity validation dialog for competitors who require validation.
+**Purpose:** Card UI for a single competitor result on the Check-In page. Shows key details, a Check In button, and an Edit button for note/email. Handles the identity validation dialog for competitors who require validation.
 
 ### Props
 
@@ -59,8 +59,12 @@ Displays `src/assets/agm-125th-logo.png` at 36px height in the toolbar.
 |---|---|---|
 | `competitor` | `CompetitorWithCheckIn` | The competitor object including `currentCheckIn` |
 | `onCheckIn` | `(id: string) => void` | Called when check-in is confirmed |
-| `onUpdate` | `(updated: Competitor) => void` | Called after DOB or validation updates |
+| `onUpdate` | `(updated: Competitor) => void` | Called after any field update (DOB, validation, note, email) |
 | `loading` | `boolean` | Whether this competitor is currently being checked in |
+
+### Context consumed
+
+- `useAuth()` from `AuthContext` — `isAdmin` (controls Date of Birth visibility)
 
 ### Internal state
 
@@ -71,6 +75,11 @@ Displays `src/assets/agm-125th-logo.png` at 36px height in the toolbar.
 | `originalDOB` | `string` | DOB at time dialog was opened (for change detection) |
 | `confirming` | `boolean` | Whether the validation confirm API calls are in progress |
 | `dialogError` | `string` | Error message inside the validation dialog |
+| `editOpen` | `boolean` | Whether the note/email edit dialog is showing |
+| `editNote` | `string` | Note field value in the edit dialog |
+| `editEmail` | `string` | Email field value in the edit dialog |
+| `editSaving` | `boolean` | Whether the note/email save API call is in progress |
+| `editError` | `string` | Error message inside the edit dialog |
 
 ### Behavior
 
@@ -81,10 +90,13 @@ Displays `src/assets/agm-125th-logo.png` at 36px height in the toolbar.
 2. Calls `validateCompetitor(id)` → calls `onUpdate(validated)`
 3. Closes dialog and calls `onCheckIn(id)`
 
+**Edit note/email:** An "Edit" button (outlined, with pencil icon) is always visible in the top-right of the card. Clicking it opens the edit dialog pre-populated with the current `note` and `email` values. On save: calls `updateCompetitorContact(id, { note, email })` → calls `onUpdate(updated)`.
+
 ### Display data
 
-- Name, validation chip (warning amber / success green), check-in status chip (success / default)
-- Age (calculated from DOB), formatted DOB, shirt size (highlighted group)
+- Name, validation chip (warning amber / success green), check-in status chip (success / default), Edit button
+- Age (calculated from DOB), shirt size (highlighted group)
+- **Date of Birth** — shown only for admin users (`isAdmin = true`)
 - Studio, teacher, email
 - Note (shown as MUI Alert if present)
 - Check-in timestamp and staff name (shown if checked in)

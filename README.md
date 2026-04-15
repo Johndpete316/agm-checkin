@@ -7,9 +7,9 @@ A competition check-in and registration management tool for AGM Music Competitio
 AGM Check-In gives registration staff everything they need to run a competition check-in desk:
 
 - **Staff authentication** — staff authenticate with a shared access code and register their name; all activity is tied to the logged-in staff member with two roles: `registration` (standard) and `admin`
-- **Competitor search and check-in** — debounced server-side name search; check in a competitor in one tap
+- **Competitor search and check-in** — debounced server-side name search; check in a competitor in one tap; all staff can update a competitor's note or email at check-in time via the Edit button on each card
 - **Identity validation** — competitors flagged for validation (typically minors) must have their date of birth reviewed and confirmed before check-in is allowed; staff can correct the DOB on the spot
-- **Competitor management** — add new competitors, edit existing records (admin), view full event history per competitor
+- **Competitor management** — add new competitors, edit existing records (admin), view full event history per competitor; date of birth is only visible to admin users in the check-in UI
 - **Event management** — manage multiple events, set the active event; check-in state is per-event
 - **Staff management** — admins can view all staff tokens, change roles, and revoke access
 - **Stats dashboard** — live summary of check-in progress, donut chart by status, bar chart of check-ins by day with T-shirt inventory breakdown
@@ -112,13 +112,13 @@ All endpoints except `/health` and `POST /api/auth/token` require `Authorization
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /api/auth/token`, `GET /api/auth/me` |
-| Competitors | `GET`, `POST /api/competitors`; `GET`, `PATCH`, `DELETE /api/competitors/{id}`; `/checkin`, `/dob`, `/validate`, `/events` sub-routes |
+| Competitors | `GET`, `POST /api/competitors`; `GET`, `PATCH`, `DELETE /api/competitors/{id}`; `/checkin`, `/contact`, `/dob`, `/validate`, `/events` sub-routes |
 | Events | `GET /api/events`, `GET /api/events/current`, `POST /api/events`, `PATCH /api/events/{id}/current` |
 | Staff | `GET /api/staff`, `PATCH /api/staff/{id}/role`, `DELETE /api/staff/{id}` |
 | Audit | `GET /api/audit` |
 | Import | `POST /api/competitors/import` |
 
-Admin-only endpoints: `PATCH /api/competitors/{id}`, `/import`, all `/api/events` mutations, all `/api/staff`, `GET /api/audit`.
+Admin-only endpoints: `PATCH /api/competitors/{id}`, `/import`, all `/api/events` mutations, all `/api/staff`, `GET /api/audit`. The `/contact` sub-route is available to all authenticated roles.
 
 ## Deployment
 

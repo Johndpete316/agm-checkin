@@ -86,6 +86,7 @@ Endpoints marked **Admin** additionally require `RequireAdmin` middleware (role 
 | POST | `/api/competitors` | Required | Create competitor |
 | PATCH | `/api/competitors/{id}` | Admin | Update all competitor fields (including `note`) |
 | PATCH | `/api/competitors/{id}/checkin` | Required | Mark checked in for current event; auto-updates `lastRegisteredEvent` |
+| PATCH | `/api/competitors/{id}/contact` | Required | Update `note` and/or `email` `{"note": "...", "email": "..."}` (both optional); available to all roles |
 | PATCH | `/api/competitors/{id}/dob` | Required | Update date of birth `{"dateOfBirth": "2005-03-15T00:00:00Z"}` |
 | PATCH | `/api/competitors/{id}/validate` | Required | Mark competitor as validated (`validated = true`) |
 | DELETE | `/api/competitors/{id}` | Required | Delete competitor |

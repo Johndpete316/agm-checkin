@@ -478,6 +478,33 @@ func (s *CompetitorService) Validate(id string) (*db.Competitor, error) {
 	return &competitor, nil
 }
 
+func (s *CompetitorService) UpdateContact(id string, note *string, email *string) (*db.Competitor, error) {
+	var competitor db.Competitor
+	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	updates := map[string]any{}
+	if note != nil {
+		updates["note"] = *note
+	}
+	if email != nil {
+		updates["email"] = *email
+	}
+	if len(updates) == 0 {
+		return &competitor, nil
+	}
+	if err := s.db.Model(&competitor).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	if note != nil {
+		competitor.Note = *note
+	}
+	if email != nil {
+		competitor.Email = *email
+	}
+	return &competitor, nil
+}
+
 func (s *CompetitorService) Update(id string, input db.Competitor) (*db.Competitor, error) {
 	var competitor db.Competitor
 	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {

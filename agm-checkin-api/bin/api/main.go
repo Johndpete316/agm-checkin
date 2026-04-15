@@ -122,6 +122,7 @@ func main() {
 		r.Get("/api/competitors/{id}", getCompetitor(competitorSvc))
 		r.Post("/api/competitors", createCompetitor(competitorSvc, auditSvc))
 		r.Patch("/api/competitors/{id}/checkin", checkInCompetitor(competitorSvc, auditSvc))
+		r.Patch("/api/competitors/{id}/contact", updateCompetitorContact(competitorSvc, auditSvc))
 		r.Patch("/api/competitors/{id}/dob", updateDOB(competitorSvc, auditSvc))
 		r.Patch("/api/competitors/{id}/validate", validateCompetitor(competitorSvc, auditSvc))
 		r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc, auditSvc))
@@ -310,6 +311,36 @@ func updateDOB(svc *service.CompetitorService, audit *service.AuditService) http
 			EntityID:   id,
 			EntityName: competitor.NameFirst + " " + competitor.NameLast,
 			Detail:     map[string]any{"newDob": body.DateOfBirth.Format("2006-01-02")},
+			IP:         authmw.ClientIP(r),
+		})
+		respondJSON(w, http.StatusOK, competitor)
+	}
+}
+
+func updateCompetitorContact(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var body struct {
+			Note  *string `json:"note"`
+			Email *string `json:"email"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		competitor, err := svc.UpdateContact(id, body.Note, body.Email)
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		actorID, actorName := actorFrom(r)
+		audit.Log(service.LogEntry{
+			ActorID:    actorID,
+			ActorName:  actorName,
+			Action:     "competitor.contact_updated",
+			EntityType: "competitor",
+			EntityID:   id,
+			EntityName: competitor.NameFirst + " " + competitor.NameLast,
 			IP:         authmw.ClientIP(r),
 		})
 		respondJSON(w, http.StatusOK, competitor)

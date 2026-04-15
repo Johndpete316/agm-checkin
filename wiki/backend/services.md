@@ -124,6 +124,10 @@ Updates the `date_of_birth` column on a single competitor. Part of the validatio
 
 Sets `validated = true` on a competitor. Does not affect `requires_validation`.
 
+#### UpdateContact(id string, note *string, email *string) (*db.Competitor, error)
+
+Updates only the `note` and/or `email` fields on a competitor. Pointer arguments distinguish "not provided" (nil — field is left unchanged) from "explicitly cleared" (pointer to empty string — field is set to `""`). Uses a `map[string]any` GORM update so zero-value strings are honoured. Returns the competitor with updated field values reflected in the struct.
+
 #### Update(id string, input db.Competitor) (*db.Competitor, error)
 
 Full record update using GORM `Save`. Copies the existing `id` onto the input struct (preserving identity) then saves all fields. Used by the admin edit dialog.

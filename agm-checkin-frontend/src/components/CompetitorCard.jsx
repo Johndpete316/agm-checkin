@@ -15,7 +15,9 @@ import TextField from '@mui/material/TextField'
 import Divider from '@mui/material/Divider'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
-import { updateCompetitorDOB, validateCompetitor } from '../api/competitors'
+import EditIcon from '@mui/icons-material/Edit'
+import { updateCompetitorDOB, validateCompetitor, updateCompetitorContact } from '../api/competitors'
+import { useAuth } from '../context/AuthContext'
 
 function calculateAge(dob) {
   if (!dob) return null
@@ -50,17 +52,46 @@ function toInputDate(dob) {
 }
 
 export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loading }) {
+  const { isAdmin } = useAuth()
+
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editedDOB, setEditedDOB] = useState('')
   const [originalDOB, setOriginalDOB] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [dialogError, setDialogError] = useState('')
 
+  const [editOpen, setEditOpen] = useState(false)
+  const [editNote, setEditNote] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
+
   const isCheckedIn = !!competitor.currentCheckIn?.checkedIn
   const needsValidation = competitor.requiresValidation && !competitor.validated
   const age = calculateAge(competitor.dateOfBirth)
   const dob = formatDOB(competitor.dateOfBirth)
   const fullName = `${competitor.nameFirst} ${competitor.nameLast}`
+
+  const handleEditOpen = () => {
+    setEditNote(competitor.note ?? '')
+    setEditEmail(competitor.email ?? '')
+    setEditError('')
+    setEditOpen(true)
+  }
+
+  const handleEditSave = async () => {
+    setEditSaving(true)
+    setEditError('')
+    try {
+      const updated = await updateCompetitorContact(competitor.id, { note: editNote, email: editEmail })
+      onUpdate?.(updated)
+      setEditOpen(false)
+    } catch {
+      setEditError('Failed to save. Please try again.')
+    } finally {
+      setEditSaving(false)
+    }
+  }
 
   const handleCheckInClick = () => {
     if (needsValidation) {
@@ -129,12 +160,16 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
                 </Typography>
               )}
             </Box>
-            <Chip
-              label={isCheckedIn ? 'Checked In' : 'Pending'}
-              color={isCheckedIn ? 'success' : 'default'}
-              size="small"
-              sx={{ mt: 0.5, ml: 1, flexShrink: 0 }}
-            />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5, ml: 1, flexShrink: 0 }}>
+              <Button size="small" onClick={handleEditOpen} startIcon={<EditIcon />} variant="outlined">
+                Edit
+              </Button>
+              <Chip
+                label={isCheckedIn ? 'Checked In' : 'Pending'}
+                color={isCheckedIn ? 'success' : 'default'}
+                size="small"
+              />
+            </Box>
           </Box>
 
           {/* Key fields */}
@@ -156,12 +191,14 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
                 {age !== null ? `${age} yrs` : '—'}
               </Typography>
             </Box>
-            <Box>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Date of Birth</Typography>
-              <Typography variant="body1" fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}>
-                {dob || '—'}
-              </Typography>
-            </Box>
+            {isAdmin && (
+              <Box>
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Date of Birth</Typography>
+                <Typography variant="body1" fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}>
+                  {dob || '—'}
+                </Typography>
+              </Box>
+            )}
             <Box>
               <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>T-Shirt</Typography>
               <Typography variant="body1" fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}>
@@ -216,6 +253,36 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
           </CardActions>
         )}
       </Card>
+
+      <Dialog open={editOpen} onClose={() => !editSaving && setEditOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Edit Note / Email</DialogTitle>
+        <DialogContent>
+          <TextField
+            fullWidth
+            label="Email"
+            type="email"
+            value={editEmail}
+            onChange={e => setEditEmail(e.target.value)}
+            sx={{ mt: 1 }}
+          />
+          <TextField
+            fullWidth
+            multiline
+            minRows={2}
+            label="Note"
+            value={editNote}
+            onChange={e => setEditNote(e.target.value)}
+            sx={{ mt: 2 }}
+          />
+          {editError && <Alert severity="error" sx={{ mt: 2 }}>{editError}</Alert>}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setEditOpen(false)} disabled={editSaving}>Cancel</Button>
+          <Button variant="contained" onClick={handleEditSave} disabled={editSaving}>
+            {editSaving ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={dialogOpen} onClose={() => !confirming && setDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
