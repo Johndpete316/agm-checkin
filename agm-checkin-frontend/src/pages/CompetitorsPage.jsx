@@ -27,6 +27,10 @@ import Popover from '@mui/material/Popover'
 import FormGroup from '@mui/material/FormGroup'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import Checkbox from '@mui/material/Checkbox'
+import Select from '@mui/material/Select'
+import MenuItem from '@mui/material/MenuItem'
+import InputLabel from '@mui/material/InputLabel'
+import FormControl from '@mui/material/FormControl'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import {
@@ -35,12 +39,16 @@ import {
   updateCompetitorDOB,
   validateCompetitor,
 } from '../api/competitors'
+import { getCurrentEvent } from '../api/events'
 import { useAuth } from '../context/AuthContext'
 import EditCompetitorDialog from '../components/EditCompetitorDialog'
 import AddCompetitorDialog from '../components/AddCompetitorDialog'
 
 // Chronological order used for event filter display
 const EVENT_ORDER = ['nat-2024', 'glr-2025', 'nat-2025', 'glr-2026']
+
+// Preferred shirt size order
+const SHIRT_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
 
 // Each column has a unique key, an optional sort field, and a label.
 // sort: null means the column is not sortable.
@@ -139,15 +147,40 @@ export default function CompetitorsPage() {
   const [visibleColumns, setVisibleColumns] = useState(loadVisibleColumns)
   const [columnsAnchor, setColumnsAnchor] = useState(null)
 
-  // Event filter — null means all events shown
-  const [eventFilter, setEventFilter] = useState(null)
+  // Filters
+  const [searchText, setSearchText] = useState('')
+  const [filterEvent, setFilterEvent] = useState('')
+  const [filterStudio, setFilterStudio] = useState('')
+  const [filterTeacher, setFilterTeacher] = useState('')
+  const [filterShirt, setFilterShirt] = useState('')
+  const [filterValidated, setFilterValidated] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+
+  const anyFilterActive = searchText || filterEvent || filterStudio || filterTeacher || filterShirt || filterValidated || filterStatus
+
+  const clearFilters = () => {
+    setSearchText('')
+    setFilterEvent('')
+    setFilterStudio('')
+    setFilterTeacher('')
+    setFilterShirt('')
+    setFilterValidated('')
+    setFilterStatus('')
+  }
 
   const fetchCompetitors = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const data = await getCompetitors()
-      setCompetitors(data)
+      const [competitorsResult, currentEventResult] = await Promise.allSettled([
+        getCompetitors(),
+        getCurrentEvent(),
+      ])
+      if (competitorsResult.status === 'rejected') throw competitorsResult.reason
+      setCompetitors(competitorsResult.value)
+      if (currentEventResult.status === 'fulfilled' && currentEventResult.value?.id) {
+        setFilterEvent(currentEventResult.value.id)
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -163,6 +196,24 @@ export default function CompetitorsPage() {
   const availableEvents = useMemo(() => {
     const found = new Set(competitors.map(c => c.lastRegisteredEvent).filter(Boolean))
     return EVENT_ORDER.filter(e => found.has(e))
+  }, [competitors])
+
+  // Unique studios, teachers, shirt sizes derived from loaded data
+  const uniqueStudios = useMemo(() => {
+    const vals = [...new Set(competitors.map(c => c.studio).filter(Boolean))].sort()
+    return vals
+  }, [competitors])
+
+  const uniqueTeachers = useMemo(() => {
+    const vals = [...new Set(competitors.map(c => c.teacher).filter(Boolean))].sort()
+    return vals
+  }, [competitors])
+
+  const uniqueShirts = useMemo(() => {
+    const found = new Set(competitors.map(c => c.shirtSize).filter(Boolean))
+    const ordered = SHIRT_ORDER.filter(s => found.has(s))
+    const rest = [...found].filter(s => !SHIRT_ORDER.includes(s)).sort()
+    return [...ordered, ...rest]
   }, [competitors])
 
   const handleSort = (sortField) => {
@@ -183,15 +234,6 @@ export default function CompetitorsPage() {
       localStorage.setItem('agm_competitors_columns', JSON.stringify([...next]))
       return next
     })
-  }
-
-  const toggleEvent = (eventId) => {
-    const current = eventFilter ?? new Set(availableEvents)
-    const next = new Set(current)
-    if (next.has(eventId)) next.delete(eventId)
-    else next.add(eventId)
-    // Normalize: if all events are selected, store null (no filter active)
-    setEventFilter(next.size === availableEvents.length ? null : next)
   }
 
   const updateLocalCompetitor = (updated) => {
@@ -244,12 +286,31 @@ export default function CompetitorsPage() {
     }
   }
 
-  const sorted = [...competitors].sort(getComparator(order, orderBy))
+  const displayed = useMemo(() => {
+    let list = [...competitors].sort(getComparator(order, orderBy))
 
-  // Apply event filter
-  const displayed = eventFilter === null
-    ? sorted
-    : sorted.filter(c => eventFilter.has(c.lastRegisteredEvent))
+    if (searchText.trim()) {
+      const q = searchText.trim().toLowerCase()
+      list = list.filter(c =>
+        `${c.nameFirst} ${c.nameLast}`.toLowerCase().includes(q) ||
+        (c.studio || '').toLowerCase().includes(q) ||
+        (c.teacher || '').toLowerCase().includes(q) ||
+        (c.email || '').toLowerCase().includes(q) ||
+        (c.shirtSize || '').toLowerCase().includes(q)
+      )
+    }
+    if (filterEvent)   list = list.filter(c => c.lastRegisteredEvent === filterEvent)
+    if (filterStudio)  list = list.filter(c => c.studio === filterStudio)
+    if (filterTeacher) list = list.filter(c => c.teacher === filterTeacher)
+    if (filterShirt)   list = list.filter(c => c.shirtSize === filterShirt)
+    if (filterValidated === 'yes')   list = list.filter(c => c.validated)
+    if (filterValidated === 'needs') list = list.filter(c => c.requiresValidation && !c.validated)
+    if (filterValidated === 'na')    list = list.filter(c => !c.requiresValidation && !c.validated)
+    if (filterStatus === 'checkedin') list = list.filter(c => !!c.currentCheckIn?.checkedIn)
+    if (filterStatus === 'pending')   list = list.filter(c => !c.currentCheckIn?.checkedIn)
+
+    return list
+  }, [competitors, order, orderBy, searchText, filterEvent, filterStudio, filterTeacher, filterShirt, filterValidated, filterStatus])
 
   const vis = (key) => visibleColumns.has(key)
 
@@ -276,46 +337,108 @@ export default function CompetitorsPage() {
         </Box>
       ) : (
         <>
-          {/* Toolbar: event filter (all breakpoints) + Columns button (desktop only) */}
-          {availableEvents.length > 1 && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
-                <Typography variant="body2" color="text.secondary" sx={{ mr: 0.5 }}>
-                  Event:
-                </Typography>
-                <FormGroup row>
-                  {availableEvents.map(eventId => (
-                    <FormControlLabel
-                      key={eventId}
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={eventFilter === null || eventFilter.has(eventId)}
-                          onChange={() => toggleEvent(eventId)}
-                        />
-                      }
-                      label={<Typography variant="body2">{eventId}</Typography>}
-                      sx={{ mr: 1.5 }}
-                    />
-                  ))}
-                </FormGroup>
-              </Box>
-              <Box sx={{ ml: 'auto', display: { xs: 'none', md: 'block' } }}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<ViewColumnIcon />}
-                  onClick={e => setColumnsAnchor(e.currentTarget)}
-                >
-                  Columns
-                </Button>
-              </Box>
-            </Box>
-          )}
+          {/* Filter bar */}
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', mb: 1 }}>
+            <TextField
+              size="small"
+              placeholder="Search name, studio, teacher, email, shirt…"
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              sx={{ minWidth: 220, flex: 1 }}
+            />
 
-          {/* Show Columns button even when there's only one event */}
-          {availableEvents.length <= 1 && (
-            <Box sx={{ display: { xs: 'none', md: 'flex' }, justifyContent: 'flex-end', mb: 2 }}>
+            {availableEvents.length > 1 && (
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel>Event</InputLabel>
+                <Select
+                  value={filterEvent}
+                  label="Event"
+                  onChange={e => setFilterEvent(e.target.value)}
+                >
+                  <MenuItem value=""><em>All</em></MenuItem>
+                  {availableEvents.map(e => (
+                    <MenuItem key={e} value={e}>{e}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+
+            <FormControl size="small" sx={{ minWidth: 130 }}>
+              <InputLabel>Studio</InputLabel>
+              <Select
+                value={filterStudio}
+                label="Studio"
+                onChange={e => setFilterStudio(e.target.value)}
+              >
+                <MenuItem value=""><em>All</em></MenuItem>
+                {uniqueStudios.map(s => (
+                  <MenuItem key={s} value={s}>{s}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" sx={{ minWidth: 130 }}>
+              <InputLabel>Teacher</InputLabel>
+              <Select
+                value={filterTeacher}
+                label="Teacher"
+                onChange={e => setFilterTeacher(e.target.value)}
+              >
+                <MenuItem value=""><em>All</em></MenuItem>
+                {uniqueTeachers.map(t => (
+                  <MenuItem key={t} value={t}>{t}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" sx={{ minWidth: 90 }}>
+              <InputLabel>Shirt</InputLabel>
+              <Select
+                value={filterShirt}
+                label="Shirt"
+                onChange={e => setFilterShirt(e.target.value)}
+              >
+                <MenuItem value=""><em>All</em></MenuItem>
+                {uniqueShirts.map(s => (
+                  <MenuItem key={s} value={s}>{s}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" sx={{ minWidth: 140 }}>
+              <InputLabel>Validated</InputLabel>
+              <Select
+                value={filterValidated}
+                label="Validated"
+                onChange={e => setFilterValidated(e.target.value)}
+              >
+                <MenuItem value=""><em>All</em></MenuItem>
+                <MenuItem value="yes">Validated</MenuItem>
+                <MenuItem value="needs">Needs Validation</MenuItem>
+                <MenuItem value="na">N/A</MenuItem>
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={filterStatus}
+                label="Status"
+                onChange={e => setFilterStatus(e.target.value)}
+              >
+                <MenuItem value=""><em>All</em></MenuItem>
+                <MenuItem value="checkedin">Checked In</MenuItem>
+                <MenuItem value="pending">Pending</MenuItem>
+              </Select>
+            </FormControl>
+
+            {anyFilterActive && (
+              <Button size="small" onClick={clearFilters}>
+                Clear
+              </Button>
+            )}
+
+            <Box sx={{ ml: 'auto', display: { xs: 'none', md: 'block' } }}>
               <Button
                 size="small"
                 variant="outlined"
@@ -325,6 +448,12 @@ export default function CompetitorsPage() {
                 Columns
               </Button>
             </Box>
+          </Box>
+
+          {anyFilterActive && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              {displayed.length} of {competitors.length} competitors
+            </Typography>
           )}
 
           {/* Mobile card list */}
