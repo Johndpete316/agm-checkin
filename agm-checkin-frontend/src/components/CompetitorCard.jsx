@@ -16,6 +16,7 @@ import Divider from '@mui/material/Divider'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import EditIcon from '@mui/icons-material/Edit'
+import EmailIcon from '@mui/icons-material/Email'
 import { updateCompetitorDOB, validateCompetitor, updateCompetitorContact } from '../api/competitors'
 import { useAuth } from '../context/AuthContext'
 
@@ -153,6 +154,15 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
                     variant="outlined"
                   />
                 )}
+                {!competitor.email && !isCheckedIn && (
+                  <Chip
+                    icon={<EmailIcon fontSize="small" />}
+                    label="No Email"
+                    color="warning"
+                    size="small"
+                    variant="outlined"
+                  />
+                )}
               </Box>
               {competitor.lastRegisteredEvent && (
                 <Typography variant="caption" color="text.secondary">
@@ -191,7 +201,7 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
                 {age !== null ? `${age} yrs` : '—'}
               </Typography>
             </Box>
-            {isAdmin && (
+            {(isAdmin || needsValidation) && (
               <Box>
                 <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Date of Birth</Typography>
                 <Typography variant="body1" fontWeight={700} sx={{ fontSize: { xs: '1.15rem', sm: '1.05rem' } }}>

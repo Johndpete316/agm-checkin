@@ -371,10 +371,12 @@ export default function CompetitorsPage() {
                       <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Age</Typography>
                       <Typography variant="body1" fontWeight={700}>{age !== null ? `${age} yrs` : '—'}</Typography>
                     </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Date of Birth</Typography>
-                      <Typography variant="body1" fontWeight={700}>{dob || '—'}</Typography>
-                    </Box>
+                    {(isAdmin || (competitor.requiresValidation && !competitor.validated)) && (
+                      <Box>
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Date of Birth</Typography>
+                        <Typography variant="body1" fontWeight={700}>{dob || '—'}</Typography>
+                      </Box>
+                    )}
                     <Box>
                       <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>T-Shirt</Typography>
                       <Typography variant="body1" fontWeight={700}>{competitor.shirtSize || '—'}</Typography>
@@ -457,9 +459,9 @@ export default function CompetitorsPage() {
                       )}
                       {vis('dob') && (
                         <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                          {dob
-                            ? `${dob}${age !== null ? ` · ${age} yrs` : ''}`
-                            : '—'
+                          {(isAdmin || (competitor.requiresValidation && !competitor.validated))
+                            ? (dob ? `${dob}${age !== null ? ` · ${age} yrs` : ''}` : '—')
+                            : (age !== null ? `${age} yrs` : '—')
                           }
                         </TableCell>
                       )}
