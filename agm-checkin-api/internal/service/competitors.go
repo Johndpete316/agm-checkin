@@ -28,10 +28,24 @@ type ImportRow struct {
 
 // ImportResult summarises what was inserted during a BulkImport call.
 type ImportResult struct {
-	CompetitorsCreated int      `json:"competitorsCreated"`
-	EventsCreated      int      `json:"eventsCreated"`
-	EventEntriesAdded  int      `json:"eventEntriesAdded"`
-	Errors             []string `json:"errors,omitempty"`
+	CompetitorsCreated int            `json:"competitorsCreated"`
+	CompetitorsMatched int            `json:"competitorsMatched"`
+	FieldsUpdated      int            `json:"fieldsUpdated"`
+	EventsCreated      int            `json:"eventsCreated"`
+	EventEntriesAdded  int            `json:"eventEntriesAdded"`
+	FieldConflicts     []FieldConflict `json:"fieldConflicts,omitempty"`
+	Errors             []string       `json:"errors,omitempty"`
+}
+
+// FieldConflict is returned when an import row has a value for a field that differs from the
+// existing record. Both sides are non-blank. The caller (UI) can resolve it by choosing which
+// value to keep. ExistingValue and ImportValue are always plain strings; dates use YYYY-MM-DD.
+type FieldConflict struct {
+	CompetitorID  string `json:"competitorId"`
+	Name          string `json:"name"`
+	Field         string `json:"field"`         // JSON field name: "email", "studio", "teacher", "shirtSize", "dateOfBirth"
+	ExistingValue string `json:"existingValue"`
+	ImportValue   string `json:"importValue"`
 }
 
 // eventOrder is the canonical chronological order for determining LastRegisteredEvent.
@@ -64,10 +78,16 @@ func mostRecentEvent(events []string) string {
 	return best
 }
 
-// BulkImport creates Postgres snapshot backup tables, then inserts all competitors and their
-// event registrations. Stub event records are auto-created for any event ID not yet in the DB.
-// The operation is designed for an empty database; re-running on a populated DB will
-// produce duplicate competitors since there is no unique constraint on (name, studio).
+// nameKey returns a normalised lookup key for a competitor name.
+func nameKey(first, last string) string {
+	return strings.ToLower(strings.TrimSpace(first)) + "|" + strings.ToLower(strings.TrimSpace(last))
+}
+
+// BulkImport creates Postgres snapshot backup tables, then processes all rows from the CSV.
+// Rows whose (first_name, last_name) match an existing competitor are merged rather than
+// duplicated: a missing DOB is filled in automatically, a conflicting DOB is returned in
+// DOBConflicts for the caller to resolve via the UI. Rows with no existing match create new
+// competitor records. Stub event records are auto-created for any event ID not yet in the DB.
 func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) {
 	result := &ImportResult{}
 
@@ -81,7 +101,18 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 		return nil, fmt.Errorf("creating backup tables: %w", err)
 	}
 
-	// --- 2. Collect all referenced event IDs and auto-create stubs for missing ones. ---
+	// --- 2. Load all existing competitors and build a name → []Competitor lookup map. ---
+	var allExisting []db.Competitor
+	if err := s.db.Find(&allExisting).Error; err != nil {
+		return nil, fmt.Errorf("loading existing competitors: %w", err)
+	}
+	existingByName := make(map[string][]db.Competitor, len(allExisting))
+	for _, c := range allExisting {
+		k := nameKey(c.NameFirst, c.NameLast)
+		existingByName[k] = append(existingByName[k], c)
+	}
+
+	// --- 3. Collect all referenced event IDs and auto-create stubs for missing ones. ---
 	eventSet := map[string]bool{}
 	for _, row := range rows {
 		for _, eid := range row.Events {
@@ -102,14 +133,102 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 		}
 	}
 
-	// --- 3. Bulk-insert all competitors. ---
-	competitors := make([]db.Competitor, 0, len(rows))
-	for _, row := range rows {
+	// --- 4. Classify each row: match existing competitor or create new. ---
+	// resolvedIDs maps import-row index → the competitor ID to use for event linking.
+	resolvedIDs := make([]string, len(rows))
+	var toCreate []db.Competitor
+	var toCreateIdx []int // maps toCreate[i] back to rows index
+
+	for i, row := range rows {
+		k := nameKey(row.NameFirst, row.NameLast)
+		matches := existingByName[k]
+
+		if len(matches) > 1 {
+			// Ambiguous — multiple existing competitors share this name. Skip to avoid
+			// incorrectly updating the wrong record.
+			result.Errors = append(result.Errors, fmt.Sprintf(
+				"%s %s: skipped — %d competitors with this name exist; resolve manually",
+				row.NameFirst, row.NameLast, len(matches),
+			))
+			continue
+		}
+
+		if len(matches) == 1 {
+			// Matched — merge all mergeable fields.
+			existing := matches[0]
+			result.CompetitorsMatched++
+			resolvedIDs[i] = existing.ID
+
+			fullName := existing.NameFirst + " " + existing.NameLast
+			autoFill := map[string]any{} // fields to auto-update (existing blank, import has value)
+
+			// String fields: blank→fill auto; both set and differ→conflict.
+			type stringField struct {
+				jsonKey  string
+				dbCol    string
+				existing string
+				incoming string
+			}
+			stringFields := []stringField{
+				{"email", "email", existing.Email, row.Email},
+				{"studio", "studio", existing.Studio, row.Studio},
+				{"teacher", "teacher", existing.Teacher, row.Teacher},
+				{"shirtSize", "shirt_size", existing.ShirtSize, row.ShirtSize},
+			}
+			for _, f := range stringFields {
+				if f.incoming == "" {
+					continue // import has nothing — leave existing alone
+				}
+				if f.existing == "" {
+					autoFill[f.dbCol] = f.incoming
+				} else if f.existing != f.incoming {
+					result.FieldConflicts = append(result.FieldConflicts, FieldConflict{
+						CompetitorID:  existing.ID,
+						Name:          fullName,
+						Field:         f.jsonKey,
+						ExistingValue: f.existing,
+						ImportValue:   f.incoming,
+					})
+				}
+			}
+
+			// Date of birth: zero→fill auto; both set and differ→conflict.
+			if row.DateOfBirth != nil {
+				importDOB := row.DateOfBirth.UTC().Truncate(24 * time.Hour)
+				if existing.DateOfBirth.IsZero() {
+					autoFill["date_of_birth"] = importDOB
+				} else {
+					existingDOB := existing.DateOfBirth.UTC().Truncate(24 * time.Hour)
+					if !existingDOB.Equal(importDOB) {
+						result.FieldConflicts = append(result.FieldConflicts, FieldConflict{
+							CompetitorID:  existing.ID,
+							Name:          fullName,
+							Field:         "dateOfBirth",
+							ExistingValue: existingDOB.Format("2006-01-02"),
+							ImportValue:   importDOB.Format("2006-01-02"),
+						})
+					}
+				}
+			}
+
+			if len(autoFill) > 0 {
+				if err := s.db.Model(&existing).Updates(autoFill).Error; err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf(
+						"%s: failed to auto-fill fields: %v", fullName, err,
+					))
+				} else {
+					result.FieldsUpdated += len(autoFill)
+				}
+			}
+			continue
+		}
+
+		// No match — queue for creation.
 		dob := time.Time{}
 		if row.DateOfBirth != nil {
 			dob = *row.DateOfBirth
 		}
-		c := db.Competitor{
+		toCreate = append(toCreate, db.Competitor{
 			NameFirst:           strings.TrimSpace(row.NameFirst),
 			NameLast:            strings.TrimSpace(row.NameLast),
 			Studio:              row.Studio,
@@ -120,26 +239,34 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 			RequiresValidation:  row.RequiresValidation,
 			Validated:           row.Validated,
 			LastRegisteredEvent: mostRecentEvent(row.Events),
-		}
-		competitors = append(competitors, c)
+		})
+		toCreateIdx = append(toCreateIdx, i)
 	}
 
-	if len(competitors) > 0 {
-		if err := s.db.Create(&competitors).Error; err != nil {
+	// --- 5. Bulk-insert new competitors. ---
+	if len(toCreate) > 0 {
+		if err := s.db.Create(&toCreate).Error; err != nil {
 			return nil, fmt.Errorf("bulk inserting competitors: %w", err)
 		}
-		result.CompetitorsCreated = len(competitors)
+		result.CompetitorsCreated = len(toCreate)
+		// Back-fill resolvedIDs for newly created records.
+		for j, rowIdx := range toCreateIdx {
+			resolvedIDs[rowIdx] = toCreate[j].ID
+		}
 	}
 
-	// --- 4. Bulk-insert CompetitorEvent rows (one per competitor × event). ---
+	// --- 6. Bulk-insert CompetitorEvent rows (one per competitor × event). ---
 	var ces []db.CompetitorEvent
 	for i, row := range rows {
+		if resolvedIDs[i] == "" {
+			continue // row was skipped (ambiguous match or creation error)
+		}
 		for _, eid := range row.Events {
 			if _, exists := eventSet[eid]; !exists {
 				continue // event creation failed; skip
 			}
 			ces = append(ces, db.CompetitorEvent{
-				CompetitorID: competitors[i].ID,
+				CompetitorID: resolvedIDs[i],
 				EventID:      eid,
 				CheckedIn:    false,
 			})

@@ -13,8 +13,9 @@ import TableContainer from '@mui/material/TableContainer'
 import TableHead from '@mui/material/TableHead'
 import TableRow from '@mui/material/TableRow'
 import Divider from '@mui/material/Divider'
+import Chip from '@mui/material/Chip'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
-import { importCompetitors } from '../api/competitors'
+import { importCompetitors, updateCompetitorDOB, getCompetitor, updateCompetitor } from '../api/competitors'
 
 const PREVIEW_ROWS = 5
 
@@ -64,6 +65,8 @@ export default function ImportPage() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  const [conflicts, setConflicts] = useState([]) // unresolved field conflicts
+  const [resolvingId, setResolvingId] = useState(null) // competitorId+field key currently being saved
 
   function handleFile(f) {
     if (!f || !f.name.endsWith('.csv')) {
@@ -93,15 +96,48 @@ export default function ImportPage() {
     if (!file) return
     setLoading(true)
     setError(null)
+    setConflicts([])
     try {
       const res = await importCompetitors(file)
       setResult(res)
+      setConflicts(res.fieldConflicts ?? [])
       setFile(null)
       setPreview(null)
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const FIELD_LABELS = {
+    email: 'Email',
+    studio: 'Studio',
+    teacher: 'Teacher',
+    shirtSize: 'Shirt Size',
+    dateOfBirth: 'Date of Birth',
+  }
+
+  async function resolveConflict(conflict, useImport) {
+    setResolvingId(conflict.competitorId + conflict.field)
+    try {
+      if (useImport) {
+        if (conflict.field === 'dateOfBirth') {
+          await updateCompetitorDOB(conflict.competitorId, conflict.importValue)
+        } else {
+          // Fetch the full record first so Save doesn't zero out other fields.
+          const current = await getCompetitor(conflict.competitorId)
+          await updateCompetitor(conflict.competitorId, { ...current, [conflict.field]: conflict.importValue })
+        }
+      }
+      // Whether keeping existing or switching to import, this conflict is resolved.
+      setConflicts(prev => prev.filter(
+        c => !(c.competitorId === conflict.competitorId && c.field === conflict.field)
+      ))
+    } catch (e) {
+      setError(`Failed to update ${FIELD_LABELS[conflict.field] ?? conflict.field} for ${conflict.name}: ${e.message}`)
+    } finally {
+      setResolvingId(null)
     }
   }
 
@@ -117,10 +153,12 @@ export default function ImportPage() {
       </Typography>
 
       {result && (
-        <Alert severity="success" sx={{ mb: 3 }} onClose={() => setResult(null)}>
+        <Alert severity="success" sx={{ mb: 3 }} onClose={() => { setResult(null); setConflicts([]) }}>
           <AlertTitle>Import complete</AlertTitle>
           <Box component="ul" sx={{ m: 0, pl: 2 }}>
             <li>{result.competitorsCreated} competitor{result.competitorsCreated !== 1 ? 's' : ''} created</li>
+            <li>{result.competitorsMatched} existing competitor{result.competitorsMatched !== 1 ? 's' : ''} matched</li>
+            <li>{result.fieldsUpdated} missing field{result.fieldsUpdated !== 1 ? 's' : ''} filled in</li>
             <li>{result.eventsCreated} stub event{result.eventsCreated !== 1 ? 's' : ''} created</li>
             <li>{result.eventEntriesAdded} event registration{result.eventEntriesAdded !== 1 ? 's' : ''} added</li>
           </Box>
@@ -133,6 +171,70 @@ export default function ImportPage() {
             </Box>
           )}
         </Alert>
+      )}
+
+      {conflicts.length > 0 && (
+        <Paper variant="outlined" sx={{ mb: 3, p: 2, borderColor: 'warning.main' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+            <Typography variant="subtitle1" fontWeight={700}>
+              DOB Conflicts — Action Required
+            </Typography>
+            <Chip label={conflicts.length} size="small" color="warning" />
+          </Box>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            These competitors have a value in both the database and the import file that differ.
+            Choose which value to keep for each one. This list will be lost if you navigate away,
+            so resolve them now.
+          </Typography>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 600 }}>Name</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>Field</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>Existing</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>Import</TableCell>
+                  <TableCell />
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {conflicts.map(conflict => {
+                  const key = conflict.competitorId + conflict.field
+                  const saving = resolvingId === key
+                  return (
+                    <TableRow key={key}>
+                      <TableCell>{conflict.name}</TableCell>
+                      <TableCell>{FIELD_LABELS[conflict.field] ?? conflict.field}</TableCell>
+                      <TableCell>{conflict.existingValue}</TableCell>
+                      <TableCell>{conflict.importValue}</TableCell>
+                      <TableCell align="right">
+                        <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            disabled={saving}
+                            onClick={() => resolveConflict(conflict, false)}
+                          >
+                            Keep existing
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            disabled={saving}
+                            startIcon={saving ? <CircularProgress size={12} color="inherit" /> : null}
+                            onClick={() => resolveConflict(conflict, true)}
+                          >
+                            Use import
+                          </Button>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
       )}
 
       {error && (
