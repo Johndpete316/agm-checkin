@@ -243,13 +243,30 @@ A globally applied `IPBlocklist` middleware blocks all endpoints for IPs that ha
 **Service:** [`CompetitorService.BulkImport`](services.md#competitorservice)  
 **Description:** Bulk-import competitors from a normalized CSV file. The handler parses the CSV and delegates to `BulkImport`. Before writing, snapshot backup tables are created in the database (`competitors_backup_<ts>` and `competitor_events_backup_<ts>`).
 
-**Request:** `multipart/form-data` with a field named `file` containing the CSV.
+**Request:** `multipart/form-data` with a field named `file` containing the CSV. Max upload size: 32 MB.
 
-**CSV format** (normalized output from `bin/import`):
-```
-first_name, last_name, studio, teacher, email, shirt_size, date_of_birth, requires_validation, validated, events
-```
-The `events` field is pipe-delimited event IDs (e.g. `nat-2024|glr-2025`).
+**CSV format** — header row must contain these columns (order-independent, extra columns ignored):
+
+| Column | Format |
+|---|---|
+| `first_name` | string |
+| `last_name` | string |
+| `studio` | string |
+| `teacher` | string |
+| `email` | string |
+| `shirt_size` | string |
+| `date_of_birth` | `YYYY-MM-DD` or blank |
+| `requires_validation` | `true`/`false` |
+| `validated` | `true`/`false` |
+| `events` | pipe-delimited event IDs, e.g. `nat-2024\|glr-2025` |
+
+**Merge behavior:** Rows are matched to existing competitors by (first\_name, last\_name) case-insensitively.
+- **New record:** created with all fields from the import row.
+- **Matched, field blank in DB:** the import value is written automatically (`fieldsUpdated` count increases).
+- **Matched, field set in both and different:** a `FieldConflict` is returned; the existing DB value is left unchanged. The UI prompts the user to resolve each conflict.
+- **Fields never overwritten on an existing record:** `requires_validation`, `validated`, `note`, `last_registered_event`, and all check-in records.
+- **Event registrations:** added for any event IDs in the import row that the competitor is not yet registered for. Existing registrations are never removed (`ON CONFLICT DO NOTHING`).
+- **Ambiguous name (2+ matches):** row is skipped, added to `errors`.
 
 **Audit log:** `competitor.bulk_import` with detail `{competitorsCreated, eventsCreated, eventEntriesAdded}`
 
@@ -257,11 +274,23 @@ The `events` field is pipe-delimited event IDs (e.g. `nat-2024|glr-2025`).
 ```json
 {
   "competitorsCreated": 0,
+  "competitorsMatched": 0,
+  "fieldsUpdated": 0,
   "eventsCreated": 0,
   "eventEntriesAdded": 0,
+  "fieldConflicts": [
+    {
+      "competitorId": "uuid",
+      "name": "Jane Smith",
+      "field": "email",
+      "existingValue": "old@example.com",
+      "importValue": "new@example.com"
+    }
+  ],
   "errors": ["optional array of non-fatal row errors"]
 }
 ```
+`fieldConflicts` and `errors` are omitted when empty.
 
 ---
 

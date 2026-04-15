@@ -54,16 +54,33 @@ type ImportRow struct {
 }
 ```
 
+#### FieldConflict
+
+Returned inside `ImportResult` when an import row has a non-blank value for a field that differs from the existing record's non-blank value. Both sides must be non-blank to qualify as a conflict (blank-to-value is auto-filled silently). Dates use `YYYY-MM-DD` string format.
+
+```go
+type FieldConflict struct {
+    CompetitorID  string `json:"competitorId"`
+    Name          string `json:"name"`           // "First Last"
+    Field         string `json:"field"`           // "email" | "studio" | "teacher" | "shirtSize" | "dateOfBirth"
+    ExistingValue string `json:"existingValue"`
+    ImportValue   string `json:"importValue"`
+}
+```
+
 #### ImportResult
 
 Return type for `BulkImport`.
 
 ```go
 type ImportResult struct {
-    CompetitorsCreated int      `json:"competitorsCreated"`
-    EventsCreated      int      `json:"eventsCreated"`
-    EventEntriesAdded  int      `json:"eventEntriesAdded"`
-    Errors             []string `json:"errors,omitempty"`
+    CompetitorsCreated int             `json:"competitorsCreated"`
+    CompetitorsMatched int             `json:"competitorsMatched"`
+    FieldsUpdated      int             `json:"fieldsUpdated"`
+    EventsCreated      int             `json:"eventsCreated"`
+    EventEntriesAdded  int             `json:"eventEntriesAdded"`
+    FieldConflicts     []FieldConflict `json:"fieldConflicts,omitempty"`
+    Errors             []string        `json:"errors,omitempty"`
 }
 ```
 
@@ -124,13 +141,16 @@ Fetches all `CompetitorEvent` rows for a competitor, then bulk-fetches the assoc
 Imports a list of competitors and their event registrations:
 
 1. Creates timestamped backup tables: `competitors_backup_<unix>` and `competitor_events_backup_<unix>` via raw SQL
-2. Collects all referenced event IDs; for any that don't exist in `events`, creates a stub record (zero dates, display name derived from slug)
-3. Bulk-inserts all `Competitor` records using `db.Create(&slice)`. `BeforeCreate` hooks fire per-record to assign UUIDs. `LastRegisteredEvent` is set to the most recent event in the import's event list according to a hardcoded canonical order: `["nat-2024", "glr-2025", "nat-2025", "glr-2026"]`
-4. Bulk-inserts `CompetitorEvent` rows using `ON CONFLICT DO NOTHING` — safe to re-run if partially completed
+2. Loads all existing competitors and builds a `(lower(first)|lower(last)) → []Competitor` lookup map
+3. Collects all referenced event IDs; for any that don't exist in `events`, creates a stub record (zero dates, display name derived from slug)
+4. Classifies each row:
+   - **Ambiguous** (2+ existing competitors share the name): skipped, added to `Errors`
+   - **Matched** (exactly 1 existing competitor): merges string fields and date of birth — blank DB fields are auto-filled, conflicting non-blank fields produce a `FieldConflict` entry. Fields never touched on an existing record: `requires_validation`, `validated`, `note`, `last_registered_event`
+   - **No match**: queued for bulk creation with all fields from the import row; `LastRegisteredEvent` is set to the most recent event according to canonical order `["nat-2024", "glr-2025", "nat-2025", "glr-2026"]`
+5. Bulk-inserts new `Competitor` records (UUIDs assigned via `BeforeCreate` GORM hook)
+6. Bulk-inserts `CompetitorEvent` rows using `ON CONFLICT DO NOTHING` — safe to re-run
 
-> **Note:** There is no unique constraint on `(name_first, name_last, studio)`. Running BulkImport on a populated database will create duplicate competitor records.
-
-**Errors:** Returns a fatal error if backup table creation or bulk competitor insertion fails. Non-fatal row-level errors (stub event creation failures, parse errors from the handler) are collected in `ImportResult.Errors`.
+**Errors:** Returns a fatal error if backup table creation or bulk competitor insertion fails. Non-fatal errors (stub event creation failures, ambiguous name collisions, parse errors from the handler) are collected in `ImportResult.Errors`.
 
 ---
 

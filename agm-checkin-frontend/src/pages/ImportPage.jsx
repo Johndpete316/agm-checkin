@@ -14,6 +14,10 @@ import TableHead from '@mui/material/TableHead'
 import TableRow from '@mui/material/TableRow'
 import Divider from '@mui/material/Divider'
 import Chip from '@mui/material/Chip'
+import Accordion from '@mui/material/Accordion'
+import AccordionSummary from '@mui/material/AccordionSummary'
+import AccordionDetails from '@mui/material/AccordionDetails'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import { importCompetitors, updateCompetitorDOB, getCompetitor, updateCompetitor } from '../api/competitors'
 
@@ -146,11 +150,103 @@ export default function ImportPage() {
       <Typography variant="h5" fontWeight={700} gutterBottom>
         Import Competitors
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Upload a normalized competitor CSV file to bulk-import historical data. A database
         snapshot is taken automatically before any changes are made so the import can be
         rolled back if needed.
       </Typography>
+
+      <Accordion disableGutters variant="outlined" sx={{ mb: 3 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="body2" fontWeight={600}>File format &amp; merge rules</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Typography variant="body2" gutterBottom>
+            The file must be a <strong>.csv</strong> with a header row containing exactly these
+            column names (order does not matter, extra columns are ignored):
+          </Typography>
+          <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, overflowX: 'auto' }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 600 }}>Column</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>Format</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>Notes</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {[
+                  ['first_name', 'string', 'Required — rows with no name are skipped'],
+                  ['last_name', 'string', 'Required — rows with no name are skipped'],
+                  ['studio', 'string', 'Leave blank if unknown'],
+                  ['teacher', 'string', 'Display name, e.g. "Smith, Jane"'],
+                  ['email', 'string', 'Student or parent email only — no teacher addresses'],
+                  ['shirt_size', 'string', 'Adult XL / L / M / S or Youth XL / L / M / S'],
+                  ['date_of_birth', 'YYYY-MM-DD or blank', 'Leave blank if unknown'],
+                  ['requires_validation', 'true / false', 'Whether ID check is needed at check-in'],
+                  ['validated', 'true / false', 'Whether ID has already been verified in a prior event'],
+                  ['events', 'pipe-separated IDs', 'e.g. nat-2024|glr-2025|glr-2026'],
+                ].map(([col, fmt, notes]) => (
+                  <TableRow key={col}>
+                    <TableCell><code>{col}</code></TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmt}</TableCell>
+                    <TableCell>{notes}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          <Typography variant="body2" fontWeight={600} gutterBottom>Example row</Typography>
+          <Box sx={{ overflowX: 'auto', mb: 2 }}>
+            <Box component="pre" sx={{ fontSize: '0.72rem', m: 0, p: 1, bgcolor: 'action.hover', borderRadius: 1, whiteSpace: 'pre' }}>
+{`first_name,last_name,studio,teacher,email,shirt_size,date_of_birth,requires_validation,validated,events
+Jane,Smith,Westside Dance,"Emshwiller, Michael",jane@example.com,Youth M,2012-04-15,true,false,nat-2024|glr-2025|glr-2026`}
+            </Box>
+          </Box>
+
+          <Typography variant="body2" fontWeight={600} gutterBottom>How merging works</Typography>
+          <Typography variant="body2" gutterBottom>
+            Competitors are matched by <strong>first name + last name</strong> (case-insensitive).
+            If a competitor with the same name already exists in the database:
+          </Typography>
+          <Box component="ul" sx={{ mt: 0, mb: 1, pl: 3 }}>
+            <Box component="li">
+              <Typography variant="body2">
+                <strong>Auto-fill:</strong> If a field is blank in the database but the import has a
+                value, it is filled in automatically. This covers email, studio, teacher, shirt size,
+                and date of birth.
+              </Typography>
+            </Box>
+            <Box component="li" sx={{ mt: 0.5 }}>
+              <Typography variant="body2">
+                <strong>Conflict:</strong> If both the database and the import have a value for the
+                same field and they differ, a conflict is raised. You will be asked to choose which
+                value to keep after the import runs. Fields that can conflict: email, studio, teacher,
+                shirt size, and date of birth.
+              </Typography>
+            </Box>
+            <Box component="li" sx={{ mt: 0.5 }}>
+              <Typography variant="body2">
+                <strong>Not modified by import:</strong> requires_validation, validated, note,
+                last_registered_event, and any check-in records are never overwritten on an existing
+                record. Event registrations are added (missing rows only) but existing ones are
+                never removed.
+              </Typography>
+            </Box>
+            <Box component="li" sx={{ mt: 0.5 }}>
+              <Typography variant="body2">
+                <strong>Ambiguous name:</strong> If more than one competitor in the database shares
+                the same name, the row is skipped and listed as a warning. Resolve these manually.
+              </Typography>
+            </Box>
+          </Box>
+          <Typography variant="body2" color="text.secondary">
+            Generate this file from raw event CSVs using:{' '}
+            <code>go run ./bin/import *.csv &gt; normalized.csv</code>
+          </Typography>
+        </AccordionDetails>
+      </Accordion>
 
       {result && (
         <Alert severity="success" sx={{ mb: 3 }} onClose={() => { setResult(null); setConflicts([]) }}>
@@ -177,7 +273,7 @@ export default function ImportPage() {
         <Paper variant="outlined" sx={{ mb: 3, p: 2, borderColor: 'warning.main' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
             <Typography variant="subtitle1" fontWeight={700}>
-              DOB Conflicts — Action Required
+              Field Conflicts — Action Required
             </Typography>
             <Chip label={conflicts.length} size="small" color="warning" />
           </Box>
@@ -266,7 +362,7 @@ export default function ImportPage() {
         </Typography>
         {!file && (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Generate this file with: <code>go run ./bin/import *.csv &gt; normalized.csv</code>
+            Must be a .csv file — see format requirements above
           </Typography>
         )}
         <input

@@ -199,18 +199,44 @@ Audit log viewer.
 
 Bulk competitor import via normalized CSV file.
 
-**UI intention:** Drag-and-drop (or click-to-select) CSV file upload area. After file selection, shows a preview of the first 5 data rows. Staff can confirm to import or cancel. Results are shown after a successful import.
+**UI intention:** A collapsible "File format & merge rules" section explains the required CSV schema, shows an example row, and describes the auto-fill and conflict-resolution behaviors. Below that is a drag-and-drop (or click-to-select) upload area. After file selection, a preview of the first 5 data rows is shown. Staff can confirm to import or cancel. After a successful import the result card shows counts and any warnings. If the import produced field conflicts, a conflict-resolution table appears above the drop zone and must be resolved before navigating away.
 
 **Data flow:**
 1. File selected (drag or input) → client-side CSV parse for preview (no API call)
 2. "Import N competitors" button clicked → `POST /api/competitors/import` (multipart form)
-3. Success → shows `ImportResult` (competitorsCreated, eventsCreated, eventEntriesAdded, errors)
+3. Success → shows `ImportResult` summary: competitorsCreated, competitorsMatched, fieldsUpdated, eventsCreated, eventEntriesAdded, errors
+4. If `result.fieldConflicts` is non-empty → conflict resolution table appears (see below)
 
-**Internal state:** `file`, `preview` (headers + rows + totalRows), `dragOver`, `loading`, `result`, `error`
+**Conflict resolution flow:**
+After import, any field where both the existing database record and the import file had different non-blank values is listed as a conflict. The table shows the competitor name, the conflicting field (email, studio, teacher, shirt size, or date of birth), the existing value, and the import value. Staff clicks **Keep existing** (no API call) or **Use import** (calls `PATCH /api/competitors/{id}/dob` for date of birth, or `PATCH /api/competitors/{id}` for all other fields). Once resolved, the conflict row is removed from the list. The list is ephemeral — navigating away loses it.
 
-**API calls:** `importCompetitors(file)` from `src/api/competitors.js`
+**Fields auto-filled (no conflict prompt):** If the database has a blank value and the import has a value, it is filled in silently. Applies to: email, studio, teacher, shirt size, date of birth.
 
-**CSV generation:** The page hints that the CSV should be generated using `go run ./bin/import *.csv > normalized.csv`.
+**Fields never overwritten on existing records:** `requires_validation`, `validated`, `note`, `last_registered_event`, and all check-in records. Event registrations are added for missing events but existing registrations are never removed.
+
+**Ambiguous name handling:** If more than one competitor in the database shares the same (first, last) name, the import row is skipped and the competitor is listed under warnings.
+
+**Internal state:** `file`, `preview` (headers + rows + totalRows), `dragOver`, `loading`, `result`, `error`, `conflicts` (unresolved FieldConflict array), `resolvingId` (competitorId+field key for the in-flight save)
+
+**API calls:**
+- `importCompetitors(file)` from `src/api/competitors.js`
+- `updateCompetitorDOB(id, date)` (conflict resolution, DOB field)
+- `getCompetitor(id)` + `updateCompetitor(id, data)` (conflict resolution, other fields)
+
+**CSV schema** (the accordion on the page spells this out):
+
+| Column | Format | Notes |
+|---|---|---|
+| `first_name` | string | Required |
+| `last_name` | string | Required |
+| `studio` | string | Blank if unknown |
+| `teacher` | string | Display name, e.g. `"Smith, Jane"` |
+| `email` | string | Student/parent email only |
+| `shirt_size` | string | `Adult XL/L/M/S` or `Youth XL/L/M/S` |
+| `date_of_birth` | `YYYY-MM-DD` or blank | |
+| `requires_validation` | `true`/`false` | Whether ID check needed at check-in |
+| `validated` | `true`/`false` | Whether ID verified in a prior event |
+| `events` | pipe-separated IDs | e.g. `nat-2024\|glr-2025\|glr-2026` |
 
 ---
 
