@@ -1,7 +1,12 @@
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
 async function handleResponse(res) {
-  if (res.status === 401) throw new Error('unauthorized')
+  if (res.status === 401) {
+    localStorage.removeItem('agm_token')
+    localStorage.removeItem('agm_staff')
+    window.location.href = '/login'
+    throw new Error('unauthorized')
+  }
   if (res.status === 403) throw new Error('forbidden')
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))

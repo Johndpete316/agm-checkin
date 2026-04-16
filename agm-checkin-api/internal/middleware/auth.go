@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"strings"
 
@@ -48,11 +49,11 @@ func GetClientIPWithMode(r *http.Request, mode TrustedProxy) string {
 			return strings.TrimSpace(strings.Split(ip, ",")[0])
 		}
 	}
-	addr := r.RemoteAddr
-	if i := strings.LastIndex(addr, ":"); i != -1 {
-		return addr[:i]
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
 	}
-	return addr
+	return host
 }
 
 // IPResolverMiddleware returns an http.Handler middleware that attaches an

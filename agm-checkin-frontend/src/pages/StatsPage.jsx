@@ -116,14 +116,17 @@ export default function StatsPage() {
   const checkInsByDay = current
     .filter(c => c.currentCheckIn?.checkedIn && c.currentCheckIn?.checkInDatetime)
     .reduce((acc, c) => {
-      const date = new Date(c.currentCheckIn.checkInDatetime).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-      acc[date] = (acc[date] || 0) + 1
+      const iso = c.currentCheckIn.checkInDatetime.slice(0, 10)
+      acc[iso] = (acc[iso] || 0) + 1
       return acc
     }, {})
 
   const barData = Object.entries(checkInsByDay)
-    .map(([date, count]) => ({ date, count }))
-    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([iso, count]) => ({
+      date: new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' }),
+      count,
+    }))
 
   // T-shirt breakdown: total registered vs handed out (checked in) per size
   const shirtData = (() => {

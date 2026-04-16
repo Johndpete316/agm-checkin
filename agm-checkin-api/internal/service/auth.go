@@ -32,7 +32,9 @@ func NewAuthService(database *gorm.DB, pin string) *AuthService {
 
 func (s *AuthService) IsIPBlocked(ip string) bool {
 	var count int64
-	s.db.Model(&db.IPBlocklist{}).Where("ip_address = ?", ip).Count(&count)
+	if err := s.db.Model(&db.IPBlocklist{}).Where("ip_address = ?", ip).Count(&count).Error; err != nil {
+		return true
+	}
 	return count > 0
 }
 

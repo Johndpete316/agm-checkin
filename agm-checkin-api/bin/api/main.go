@@ -149,7 +149,7 @@ func main() {
 	})
 
 	log.Println("Listening on :8080")
-	http.ListenAndServe(":8080", r)
+	log.Fatal(http.ListenAndServe(":8080", r))
 }
 
 // actorFrom extracts actor ID and display name from the request context.

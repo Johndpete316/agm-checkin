@@ -27,7 +27,7 @@ import { listStaff, updateStaffRole, revokeStaff } from '../api/staff'
 
 export default function ManageUsersPage() {
   const { token, staff: currentStaff } = useAuth()
-  const isSelf = (s) => s.firstName === currentStaff?.firstName && s.lastName === currentStaff?.lastName
+  const isSelf = (s) => s.id === currentStaff?.id
   const [staff, setStaff] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

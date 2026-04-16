@@ -122,6 +122,9 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 	for eid := range eventSet {
 		var existing db.Event
 		if err := s.db.First(&existing, "id = ?", eid).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("checking event %s: %w", eid, err)
+			}
 			// Event doesn't exist — create a stub. Dates are left as zero; admin fills them in later.
 			name := eventDisplayName(eid)
 			stub := db.Event{ID: eid, Name: name}
@@ -275,10 +278,11 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 
 	if len(ces) > 0 {
 		// ON CONFLICT DO NOTHING — safe to re-run if partially completed.
-		if err := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&ces).Error; err != nil {
-			return nil, fmt.Errorf("bulk inserting competitor events: %w", err)
+		ceResult := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&ces)
+		if ceResult.Error != nil {
+			return nil, fmt.Errorf("bulk inserting competitor events: %w", ceResult.Error)
 		}
-		result.EventEntriesAdded = len(ces)
+		result.EventEntriesAdded = int(ceResult.RowsAffected)
 	}
 
 	return result, nil
@@ -370,7 +374,9 @@ func (s *CompetitorService) GetAll(search string, adminView bool) ([]CompetitorW
 			ids[i] = c.ID
 		}
 		var checkIns []db.CompetitorEvent
-		s.db.Where("competitor_id IN ? AND event_id = ?", ids, eventID).Find(&checkIns)
+		if err := s.db.Where("competitor_id IN ? AND event_id = ?", ids, eventID).Find(&checkIns).Error; err != nil {
+			return nil, err
+		}
 		for i := range checkIns {
 			ce := checkIns[i]
 			checkInMap[ce.CompetitorID] = &ce
@@ -442,7 +448,9 @@ func (s *CompetitorService) CheckIn(id string, staffName string) (*CompetitorWit
 	// Keep lastRegisteredEvent in sync so the competitor stays visible
 	// to registration users for this event.
 	if competitor.LastRegisteredEvent != eventID {
-		s.db.Model(&competitor).Update("last_registered_event", eventID)
+		if err := s.db.Model(&competitor).Update("last_registered_event", eventID).Error; err != nil {
+			return nil, fmt.Errorf("updating last registered event: %w", err)
+		}
 		competitor.LastRegisteredEvent = eventID
 	}
 
@@ -457,6 +465,7 @@ func (s *CompetitorService) UpdateDOB(id string, dob time.Time) (*db.Competitor,
 	if err := s.db.Model(&competitor).Update("date_of_birth", dob).Error; err != nil {
 		return nil, err
 	}
+	competitor.DateOfBirth = dob
 	return &competitor, nil
 }
 
@@ -537,7 +546,9 @@ func (s *CompetitorService) GetEventHistory(competitorID string) ([]CompetitorEv
 	}
 
 	var events []db.Event
-	s.db.Where("id IN ?", eventIDs).Find(&events)
+	if err := s.db.Where("id IN ?", eventIDs).Find(&events).Error; err != nil {
+		return nil, err
+	}
 
 	eventMap := make(map[string]db.Event)
 	for _, e := range events {

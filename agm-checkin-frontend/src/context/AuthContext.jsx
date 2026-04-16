@@ -56,7 +56,7 @@ export function AuthProvider({ children }) {
         }
         if (!res.ok) return
         const data = await res.json()
-        const updatedStaff = { ...stored.staff, role: data.role }
+        const updatedStaff = { ...stored.staff, role: data.role, id: data.id }
         localStorage.setItem('agm_staff', JSON.stringify(updatedStaff))
         setAuth({ token: stored.token, staff: updatedStaff })
       } catch {

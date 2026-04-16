@@ -488,9 +488,9 @@ export default function CompetitorsPage() {
                       />
                       {competitor.validated ? (
                           <Chip icon={<CheckCircleOutlineIcon />} label="Validated" color="success" size="small" variant="outlined" />
-                        ) : (
+                        ) : competitor.requiresValidation ? (
                           <Chip icon={<WarningAmberIcon />} label="Validate" color="warning" size="small" variant="outlined" />
-                        )
+                        ) : null
                       }
                     </Box>
                   </Box>
