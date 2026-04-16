@@ -18,6 +18,7 @@ import {
   YAxis,
   CartesianGrid,
   ResponsiveContainer,
+  LabelList,
 } from 'recharts'
 import { getCompetitors } from '../api/competitors'
 import { getCurrentEvent } from '../api/events'
@@ -128,7 +129,8 @@ export default function StatsPage() {
   const shirtData = (() => {
     const sizes = {}
     current.forEach(c => {
-      const size = c.shirtSize || 'N/A'
+      const size = c.shirtSize
+      if (!size) return
       if (!sizes[size]) sizes[size] = { total: 0, handedOut: 0 }
       sizes[size].total++
       if (c.currentCheckIn?.checkedIn) sizes[size].handedOut++
@@ -288,11 +290,11 @@ export default function StatsPage() {
                     <Typography color="text.secondary">No shirt size data available.</Typography>
                   </Box>
                 ) : (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={shirtData} barSize={36}>
-                      <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#E0E0E0" />
-                      <XAxis dataKey="size" axisLine={false} tickLine={false} tick={{ fontSize: 13 }} />
-                      <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 13 }} width={30} />
+                  <ResponsiveContainer width="100%" height={shirtData.length * 44 + 20}>
+                    <BarChart data={shirtData} layout="vertical" barSize={22} margin={{ left: 8, right: 40 }}>
+                      <CartesianGrid strokeDasharray="4 4" horizontal={false} stroke="#9E9E9E" strokeOpacity={0.3} />
+                      <XAxis type="number" allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                      <YAxis type="category" dataKey="size" axisLine={false} tickLine={false} tick={{ fontSize: 13 }} width={60} />
                       <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
                       <Legend
                         formatter={(value) => (
@@ -300,7 +302,9 @@ export default function StatsPage() {
                         )}
                       />
                       <Bar dataKey="handedOut" name="Handed Out" stackId="shirts" fill={SHIRT_COLORS.handedOut} radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="remaining" name="Remaining" stackId="shirts" fill={SHIRT_COLORS.remaining} radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="remaining" name="Remaining" stackId="shirts" fill={SHIRT_COLORS.remaining} radius={[4, 4, 4, 4]}>
+                        <LabelList dataKey="total" position="right" style={{ fontSize: 12, fill: 'currentColor' }} />
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 )}
