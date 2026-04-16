@@ -36,7 +36,7 @@ export default function CheckInPage() {
     setLoading(true)
     const timeout = setTimeout(() => {
       fetchCompetitors(search.trim())
-    }, 300)
+    }, 150)
     return () => clearTimeout(timeout)
   }, [search, fetchCompetitors])
 
@@ -69,40 +69,39 @@ export default function CheckInPage() {
         onChange={e => setSearch(e.target.value)}
         sx={{ mb: 3 }}
         autoFocus
-        slotProps={{ input: { sx: { fontSize: { xs: '1.15rem', sm: '1rem' } } } }}
+        slotProps={{
+          input: {
+            sx: { fontSize: { xs: '1.15rem', sm: '1rem' } },
+            endAdornment: loading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null,
+          },
+        }}
       />
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-          <CircularProgress />
-        </Box>
-      ) : (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {competitors.map(competitor => (
-            <CompetitorCard
-              key={competitor.id}
-              competitor={competitor}
-              onCheckIn={handleCheckIn}
-              onUpdate={handleUpdate}
-              loading={checkingIn === competitor.id}
-            />
-          ))}
-          {!loading && competitors.length === 0 && search.trim() && (
-            <Typography color="text.secondary" textAlign="center" sx={{ mt: 2 }}>
-              No competitors found for "{search}"
-            </Typography>
-          )}
-          {!search.trim() && (
-            <Typography color="text.secondary" textAlign="center" sx={{ mt: 2 }}>
-              Start typing to search for a competitor
-            </Typography>
-          )}
-        </Box>
-      )}
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {competitors.map(competitor => (
+          <CompetitorCard
+            key={competitor.id}
+            competitor={competitor}
+            onCheckIn={handleCheckIn}
+            onUpdate={handleUpdate}
+            loading={checkingIn === competitor.id}
+          />
+        ))}
+        {!loading && competitors.length === 0 && search.trim() && (
+          <Typography color="text.secondary" textAlign="center" sx={{ mt: 2 }}>
+            No competitors found for "{search}"
+          </Typography>
+        )}
+        {!search.trim() && (
+          <Typography color="text.secondary" textAlign="center" sx={{ mt: 2 }}>
+            Start typing to search for a competitor
+          </Typography>
+        )}
+      </Box>
     </Box>
   )
 }
