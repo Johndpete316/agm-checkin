@@ -1,0 +1,11 @@
+services:
+  agm-postgres-mcp:
+    image: crystaldba/postgres-mcp
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URI: ${DATABASE_URI}
+    command:
+      - "--access-mode=restricted"
+      - "--transport=sse"
