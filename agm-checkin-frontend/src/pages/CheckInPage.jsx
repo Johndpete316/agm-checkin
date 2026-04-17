@@ -36,7 +36,7 @@ export default function CheckInPage() {
     setLoading(true)
     const timeout = setTimeout(() => {
       fetchCompetitors(search.trim())
-    }, 150)
+    }, 300)
     return () => clearTimeout(timeout)
   }, [search, fetchCompetitors])
 
