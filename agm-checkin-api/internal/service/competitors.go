@@ -354,7 +354,10 @@ func (s *CompetitorService) GetAll(search string, adminView bool) ([]CompetitorW
 		query = query.Where(
 			"name_first ILIKE ? OR name_last ILIKE ? OR CONCAT(name_first, ' ', name_last) ILIKE ?",
 			like, like, like,
-		)
+		).Order(clause.Expr{
+			SQL:  "CASE WHEN name_last ILIKE ? THEN 0 WHEN name_first ILIKE ? THEN 1 ELSE 2 END, name_last, name_first",
+			Vars: []interface{}{like, like},
+		})
 	}
 
 	var competitors []db.Competitor
