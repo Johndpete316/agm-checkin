@@ -39,13 +39,10 @@ import {
   updateCompetitorDOB,
   validateCompetitor,
 } from '../api/competitors'
-import { getCurrentEvent } from '../api/events'
+import { listEvents, getCurrentEvent } from '../api/events'
 import { useAuth } from '../context/AuthContext'
 import EditCompetitorDialog from '../components/EditCompetitorDialog'
 import AddCompetitorDialog from '../components/AddCompetitorDialog'
-
-// Chronological order used for event filter display
-const EVENT_ORDER = ['nat-2024', 'glr-2025', 'nat-2025', 'glr-2026']
 
 // Preferred shirt size order
 const SHIRT_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
@@ -131,6 +128,7 @@ function toInputDate(dob) {
 export default function CompetitorsPage() {
   const { isAdmin } = useAuth()
   const [competitors, setCompetitors] = useState([])
+  const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [order, setOrder] = useState('asc')
@@ -172,12 +170,14 @@ export default function CompetitorsPage() {
     setLoading(true)
     setError(null)
     try {
-      const [competitorsResult, currentEventResult] = await Promise.allSettled([
+      const [competitorsResult, eventsResult, currentEventResult] = await Promise.allSettled([
         getCompetitors(),
+        listEvents(),
         getCurrentEvent(),
       ])
       if (competitorsResult.status === 'rejected') throw competitorsResult.reason
       setCompetitors(competitorsResult.value)
+      if (eventsResult.status === 'fulfilled') setEvents(eventsResult.value)
       if (currentEventResult.status === 'fulfilled' && currentEventResult.value?.id) {
         setFilterEvent(currentEventResult.value.id)
       }
@@ -192,11 +192,11 @@ export default function CompetitorsPage() {
     fetchCompetitors()
   }, [fetchCompetitors])
 
-  // Derive which event IDs are present in the loaded data, in chronological order
+  // Events present in the loaded competitor data, ordered by start_date from the API
   const availableEvents = useMemo(() => {
     const found = new Set(competitors.map(c => c.lastRegisteredEvent).filter(Boolean))
-    return EVENT_ORDER.filter(e => found.has(e))
-  }, [competitors])
+    return events.filter(e => found.has(e.id)).reverse()
+  }, [competitors, events])
 
   // Unique studios, teachers, shirt sizes derived from loaded data
   const uniqueStudios = useMemo(() => {
@@ -357,7 +357,7 @@ export default function CompetitorsPage() {
                 >
                   <MenuItem value=""><em>All</em></MenuItem>
                   {availableEvents.map(e => (
-                    <MenuItem key={e} value={e}>{e}</MenuItem>
+                    <MenuItem key={e.id} value={e.id}>{e.name}</MenuItem>
                   ))}
                 </Select>
               </FormControl>

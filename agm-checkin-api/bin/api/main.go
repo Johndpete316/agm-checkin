@@ -65,6 +65,7 @@ func main() {
 	staffSvc := service.NewStaffService(database)
 	eventSvc := service.NewEventService(database)
 	auditSvc := service.NewAuditService(database)
+	scheduleSvc := service.NewScheduleService(database)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -121,6 +122,7 @@ func main() {
 		r.Patch("/api/competitors/{id}/validate", validateCompetitor(competitorSvc, auditSvc))
 		r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc, auditSvc))
 		r.Get("/api/competitors/{id}/events", getCompetitorEvents(competitorSvc))
+		r.Get("/api/competitors/{id}/schedule", getCompetitorSchedule(scheduleSvc, eventSvc))
 
 		r.Get("/api/events", listEvents(eventSvc))
 		r.Get("/api/events/current", getCurrentEvent(eventSvc))
@@ -139,6 +141,11 @@ func main() {
 			r.Get("/api/audit", listAudit(auditSvc))
 
 			r.Post("/api/competitors/import", bulkImportCompetitors(competitorSvc, auditSvc))
+
+			r.Post("/api/competitors/{id}/schedule/import", bulkImportSchedule(scheduleSvc, auditSvc))
+			r.Post("/api/competitors/{id}/schedule", createScheduleEntry(scheduleSvc, auditSvc))
+			r.Patch("/api/schedule/{id}", updateScheduleEntry(scheduleSvc, auditSvc))
+			r.Delete("/api/schedule/{id}", deleteScheduleEntry(scheduleSvc, auditSvc))
 		})
 	})
 

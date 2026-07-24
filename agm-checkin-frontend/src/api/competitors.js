@@ -102,6 +102,13 @@ export async function deleteCompetitor(id) {
   if (!res.ok) throw new Error('Failed to delete competitor')
 }
 
+export async function getCompetitorSchedule(id, eventId) {
+  const params = eventId ? `?eventId=${encodeURIComponent(eventId)}` : ''
+  const res = await apiFetch(`${BASE_URL}/api/competitors/${id}/schedule${params}`)
+  if (!res.ok) throw new Error('Failed to fetch schedule')
+  return res.json()
+}
+
 export async function importCompetitors(file) {
   const form = new FormData()
   form.append('file', file)

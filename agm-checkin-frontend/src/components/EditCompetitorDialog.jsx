@@ -23,9 +23,9 @@ import TableRow from '@mui/material/TableRow'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline'
 import { updateCompetitor, getCompetitorEvents } from '../api/competitors'
+import { listEvents } from '../api/events'
 
 const SHIRT_SIZES = ['Adult XL', 'Adult L', 'Adult M', 'Adult S', 'Youth XL', 'Youth L', 'Youth M', 'Youth S']
-const EVENTS = ['glr-2026', 'nat-2025', 'glr-2025', 'nat-2024']
 
 function toInputDate(iso) {
   if (!iso) return ''
@@ -43,6 +43,11 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [eventHistory, setEventHistory] = useState([])
+  const [events, setEvents] = useState([])
+
+  useEffect(() => {
+    listEvents().then(setEvents).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!competitor) return
@@ -171,7 +176,9 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
                 onChange={e => set('lastRegisteredEvent', e.target.value)}
               >
                 <MenuItem value=""><em>None</em></MenuItem>
-                {EVENTS.map(e => <MenuItem key={e} value={e}>{e}</MenuItem>)}
+                {events.map(e => (
+                  <MenuItem key={e.id} value={e.id}>{e.name} ({e.id})</MenuItem>
+                ))}
               </Select>
             </FormControl>
           </Box>

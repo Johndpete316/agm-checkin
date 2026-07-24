@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import CardActions from '@mui/material/CardActions'
@@ -13,12 +13,25 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogActions from '@mui/material/DialogActions'
 import TextField from '@mui/material/TextField'
 import Divider from '@mui/material/Divider'
+import Table from '@mui/material/Table'
+import TableBody from '@mui/material/TableBody'
+import TableCell from '@mui/material/TableCell'
+import TableHead from '@mui/material/TableHead'
+import TableRow from '@mui/material/TableRow'
+import CircularProgress from '@mui/material/CircularProgress'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import EditIcon from '@mui/icons-material/Edit'
 import EmailIcon from '@mui/icons-material/Email'
-import { updateCompetitorDOB, validateCompetitor, updateCompetitorContact } from '../api/competitors'
+import { updateCompetitorDOB, validateCompetitor, updateCompetitorContact, getCompetitorSchedule } from '../api/competitors'
 import { useAuth } from '../context/AuthContext'
+
+function formatScheduleDate(dateStr) {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'numeric', day: 'numeric', timeZone: 'UTC' })
+}
 
 function calculateAge(dob) {
   if (!dob) return null
@@ -60,6 +73,17 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
   const [originalDOB, setOriginalDOB] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [dialogError, setDialogError] = useState('')
+
+  const [schedule, setSchedule] = useState(null)
+  const [scheduleLoading, setScheduleLoading] = useState(true)
+
+  useEffect(() => {
+    setScheduleLoading(true)
+    getCompetitorSchedule(competitor.id)
+      .then(setSchedule)
+      .catch(() => setSchedule([]))
+      .finally(() => setScheduleLoading(false))
+  }, [competitor.id])
 
   const [editOpen, setEditOpen] = useState(false)
   const [editNote, setEditNote] = useState('')
@@ -236,6 +260,47 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
             <Alert severity="info" sx={{ mt: 1.5, py: 0.5 }}>
               {competitor.note}
             </Alert>
+          )}
+
+          {/* Schedule section */}
+          {scheduleLoading && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1.5 }}>
+              <CircularProgress size={14} />
+              <Typography variant="caption" color="text.secondary">Loading schedule…</Typography>
+            </Box>
+          )}
+          {!scheduleLoading && schedule && schedule.length > 0 && (
+            <>
+              <Divider sx={{ my: 1.5 }} />
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Schedule
+              </Typography>
+              <Box sx={{ overflowX: 'auto', mt: 0.5 }}>
+                <Table size="small" sx={{ minWidth: 400 }}>
+                  <TableHead>
+                    <TableRow>
+                      {['Day', 'Time', 'Room', 'Instrument', 'Category', 'Division'].map(h => (
+                        <TableCell key={h} sx={{ fontSize: '0.7rem', fontWeight: 600, py: 0.5, px: 1, color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                          {h}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {schedule.map(entry => (
+                      <TableRow key={entry.id} sx={{ '&:last-child td': { border: 0 } }}>
+                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1, whiteSpace: 'nowrap' }}>{formatScheduleDate(entry.scheduleDate)}</TableCell>
+                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1, whiteSpace: 'nowrap' }}>{entry.scheduleTime}</TableCell>
+                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1, whiteSpace: 'nowrap' }}>{entry.room || '—'}</TableCell>
+                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1 }}>{entry.instrument}</TableCell>
+                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1 }}>{entry.category}</TableCell>
+                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1 }}>{entry.division}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
+            </>
           )}
 
           {isCheckedIn && competitor.currentCheckIn?.checkInDatetime && (

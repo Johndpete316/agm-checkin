@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	eventNAT2026 = "nat-2026"
 	eventGLR2026 = "glr-2026"
 	eventGLR2025 = "glr-2025"
 	eventNAT2025 = "nat-2025"
@@ -40,7 +41,7 @@ type mergedRecord struct {
 	Email     string
 	ShirtSize string
 	DOB       *time.Time
-	Verified  bool          // true if verified="yes" in any historical sheet
+	Verified  bool // true if verified="yes" in any historical sheet
 	Events    map[string]bool
 }
 

@@ -278,9 +278,9 @@ If `Competitor` fields change in the backend:
 ---
 
 ## Deployment
-
+asdf
 **Full deploy** (build images + push to nodes + helm upgrade + rolling restart):
-```fish
+```fishasasdf
 cd scripts && ./push-images.fish
 ```
 

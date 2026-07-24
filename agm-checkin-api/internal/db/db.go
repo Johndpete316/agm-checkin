@@ -62,6 +62,27 @@ func (ce *CompetitorEvent) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// CompetitorSchedule records a single scheduled slot for a competitor at a specific event.
+// One competitor may have multiple rows (e.g. Sight Reading + Test List on different days).
+// SortOrder is pre-computed at import time (minutes since midnight) and used for ORDER BY.
+type CompetitorSchedule struct {
+	ID           string    `gorm:"primaryKey;type:uuid" json:"id"`
+	CompetitorID string    `gorm:"not null;index:idx_cs_competitor_event" json:"competitorId"`
+	EventID      string    `gorm:"not null;index:idx_cs_competitor_event" json:"eventId"`
+	Instrument   string    `gorm:"not null" json:"instrument"`
+	ScheduleDate time.Time `gorm:"not null;type:date" json:"scheduleDate"`
+	ScheduleTime string    `gorm:"column:schedule_time;not null" json:"scheduleTime"`
+	Room         string    `json:"room"`
+	Category     string    `gorm:"not null" json:"category"`
+	Division     string    `gorm:"not null" json:"division"`
+	SortOrder    int       `gorm:"not null;default:0" json:"sortOrder"`
+}
+
+func (cs *CompetitorSchedule) BeforeCreate(tx *gorm.DB) error {
+	cs.ID = uuid.New().String()
+	return nil
+}
+
 // AuditLog records every state-changing operation with who did it, what changed, and from where.
 // DetailRaw stores action-specific JSON (e.g. new role, event ID) — excluded from JSON output;
 // callers should embed it as json.RawMessage in a view struct.
@@ -83,6 +104,7 @@ func AutoMigrate(database *gorm.DB) {
 		&Competitor{},
 		&Event{},
 		&CompetitorEvent{},
+		&CompetitorSchedule{},
 		&AuditLog{},
 		&IPBlocklist{},
 		&PINAttempt{},

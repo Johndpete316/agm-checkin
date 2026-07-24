@@ -49,7 +49,7 @@ type FieldConflict struct {
 }
 
 // eventOrder is the canonical chronological order for determining LastRegisteredEvent.
-var eventOrder = []string{"nat-2024", "glr-2025", "nat-2025", "glr-2026"}
+var eventOrder = []string{"nat-2024", "glr-2025", "nat-2025", "glr-2026", "nat-2026"}
 
 func eventRank(id string) int {
 	for i, e := range eventOrder {
@@ -176,7 +176,6 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 				{"email", "email", existing.Email, row.Email},
 				{"studio", "studio", existing.Studio, row.Studio},
 				{"teacher", "teacher", existing.Teacher, row.Teacher},
-				{"shirtSize", "shirt_size", existing.ShirtSize, row.ShirtSize},
 			}
 			for _, f := range stringFields {
 				if f.incoming == "" {
@@ -193,6 +192,18 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 						ImportValue:   f.incoming,
 					})
 				}
+			}
+
+			// Shirt size is always overwritten when the import has a value —
+			// it's event-specific and the latest registration is authoritative.
+			if row.ShirtSize != "" {
+				autoFill["shirt_size"] = row.ShirtSize
+			}
+
+			// Update lastRegisteredEvent when incoming events include something newer.
+			if incoming := mostRecentEvent(row.Events); incoming != "" &&
+				eventRank(incoming) > eventRank(existing.LastRegisteredEvent) {
+				autoFill["last_registered_event"] = incoming
 			}
 
 			// Date of birth: zero→fill auto; both set and differ→conflict.
