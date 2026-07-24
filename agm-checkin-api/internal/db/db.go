@@ -12,7 +12,7 @@ import (
 type Competitor struct {
 	ID                  string    `gorm:"primaryKey;type:uuid" json:"id"`
 	NameFirst           string    `json:"nameFirst"`
-	NameLast            string    `json:"nameLast"`
+	NameLast            string    `gorm:"index" json:"nameLast"`
 	DateOfBirth         time.Time `json:"dateOfBirth"`
 	RequiresValidation  bool      `json:"requiresValidation"`
 	Validated           bool      `json:"validated"`
@@ -20,7 +20,7 @@ type Competitor struct {
 	Email               string    `json:"email"`
 	Teacher             string    `json:"teacher"`
 	Studio              string    `json:"studio"`
-	LastRegisteredEvent string    `json:"lastRegisteredEvent"`
+	LastRegisteredEvent string    `gorm:"index" json:"lastRegisteredEvent"`
 	Note                string    `json:"note"`
 }
 

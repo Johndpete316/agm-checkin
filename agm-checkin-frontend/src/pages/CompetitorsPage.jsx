@@ -169,22 +169,26 @@ export default function CompetitorsPage() {
   const fetchCompetitors = useCallback(async () => {
     setLoading(true)
     setError(null)
+
+    // Fire all three in parallel so they overlap on the wire.
+    const competitorsPromise = getCompetitors()
+    const eventsPromise = listEvents()
+    const currentEventPromise = getCurrentEvent()
+
+    // Unblock the table as soon as competitor data arrives — don't wait for filter metadata.
     try {
-      const [competitorsResult, eventsResult, currentEventResult] = await Promise.allSettled([
-        getCompetitors(),
-        listEvents(),
-        getCurrentEvent(),
-      ])
-      if (competitorsResult.status === 'rejected') throw competitorsResult.reason
-      setCompetitors(competitorsResult.value)
-      if (eventsResult.status === 'fulfilled') setEvents(eventsResult.value)
-      if (currentEventResult.status === 'fulfilled' && currentEventResult.value?.id) {
-        setFilterEvent(currentEventResult.value.id)
-      }
+      setCompetitors(await competitorsPromise)
     } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+
+    // Populate filter state when the secondary requests finish.
+    const [eventsResult, currentEventResult] = await Promise.allSettled([eventsPromise, currentEventPromise])
+    if (eventsResult.status === 'fulfilled') setEvents(eventsResult.value)
+    if (currentEventResult.status === 'fulfilled' && currentEventResult.value?.id) {
+      setFilterEvent(currentEventResult.value.id)
     }
   }, [])
 
