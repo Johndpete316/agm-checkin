@@ -456,8 +456,13 @@ func (s *CompetitorService) CheckIn(id string, staffName string) (*CompetitorWit
 		return nil, err
 	}
 
-	// Re-fetch to get the ID if it was an update (upsert may not populate ID on conflict path).
-	s.db.Where("competitor_id = ? AND event_id = ?", id, eventID).First(&ce)
+	// Reload the stored row. On the conflict path BeforeCreate has already
+	// overwritten ce.ID with a freshly generated UUID that was never persisted,
+	// and GORM would otherwise use that stale primary key as a query condition.
+	ce.ID = ""
+	if err := s.db.Where("competitor_id = ? AND event_id = ?", id, eventID).First(&ce).Error; err != nil {
+		return nil, fmt.Errorf("reloading check-in record: %w", err)
+	}
 
 	// Keep lastRegisteredEvent in sync so the competitor stays visible
 	// to registration users for this event.

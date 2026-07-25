@@ -35,9 +35,10 @@ type Event struct {
 
 // CompetitorEvent records a competitor's participation in a specific event.
 // The unique index on (competitor_id, event_id) ensures one row per competitor per event.
+// Foreign keys to competitors and events are owned by migration 001, not by AutoMigrate.
 type CompetitorEvent struct {
 	ID              string     `gorm:"primaryKey;type:uuid" json:"id"`
-	CompetitorID    string     `gorm:"not null;uniqueIndex:idx_competitor_event" json:"competitorId"`
+	CompetitorID    string     `gorm:"type:uuid;not null;uniqueIndex:idx_competitor_event" json:"competitorId"`
 	EventID         string     `gorm:"not null;uniqueIndex:idx_competitor_event" json:"eventId"`
 	CheckedIn       bool       `gorm:"not null;default:false" json:"checkedIn"`
 	CheckInDatetime *time.Time `json:"checkInDatetime"` // null for historical imports
@@ -65,9 +66,10 @@ func (ce *CompetitorEvent) BeforeCreate(tx *gorm.DB) error {
 // CompetitorSchedule records a single scheduled slot for a competitor at a specific event.
 // One competitor may have multiple rows (e.g. Sight Reading + Test List on different days).
 // SortOrder is pre-computed at import time (minutes since midnight) and used for ORDER BY.
+// Foreign keys to competitors and events are owned by migration 001, not by AutoMigrate.
 type CompetitorSchedule struct {
 	ID           string    `gorm:"primaryKey;type:uuid" json:"id"`
-	CompetitorID string    `gorm:"not null;index:idx_cs_competitor_event" json:"competitorId"`
+	CompetitorID string    `gorm:"type:uuid;not null;index:idx_cs_competitor_event" json:"competitorId"`
 	EventID      string    `gorm:"not null;index:idx_cs_competitor_event" json:"eventId"`
 	Instrument   string    `gorm:"not null" json:"instrument"`
 	ScheduleDate time.Time `gorm:"not null;type:date" json:"scheduleDate"`

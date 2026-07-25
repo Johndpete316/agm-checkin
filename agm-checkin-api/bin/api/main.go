@@ -60,6 +60,14 @@ func main() {
 	database := db.Connect(dsn)
 	db.AutoMigrate(database)
 
+	// Ordered migrations own anything AutoMigrate cannot express — type changes,
+	// constraints and backfills. In production the pre-upgrade hook has already
+	// run these; this covers fresh installs and local development. Serving
+	// traffic against an un-migrated schema is worse than failing to start.
+	if err := db.Migrate(database); err != nil {
+		log.Fatalf("migrations failed: %v", err)
+	}
+
 	competitorSvc := service.NewCompetitorService(database)
 	authSvc := service.NewAuthService(database, pin)
 	staffSvc := service.NewStaffService(database)
