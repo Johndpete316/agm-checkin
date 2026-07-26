@@ -32,21 +32,32 @@ const (
 )
 
 // GetClientIP returns the real client IP according to the configured proxy
-// trust level.  When mode is TrustedProxyCloudflare the CF-Connecting-IP and
-// X-Forwarded-For headers are used; otherwise only RemoteAddr is used.
+// trust level.  When mode is TrustedProxyCloudflare the CF-Connecting-IP header
+// is used; otherwise only RemoteAddr is used.
 func GetClientIP(r *http.Request) string {
 	return GetClientIPWithMode(r, TrustedProxyCloudflare)
 }
 
 // GetClientIPWithMode is the same as GetClientIP but accepts an explicit mode.
 // Use this variant when the proxy trust mode is read from configuration.
+//
+// In cloudflare mode only CF-Connecting-IP is consulted.  X-Forwarded-For is
+// deliberately not used as a fallback: cloudflared always sets
+// CF-Connecting-IP, so the fallback could only ever fire for a request that did
+// not come through the tunnel — precisely the request whose headers are
+// attacker-controlled.  For those, RemoteAddr (the real TCP peer) is strictly
+// more trustworthy than anything the caller wrote in a header.
+//
+// The header value must parse as an IP address.  Cloudflare only ever sends a
+// literal IP, so a value that does not parse did not come from Cloudflare, and
+// accepting it would let a caller write arbitrary text into the blocklist,
+// attempt-counter, and audit-log IP columns.
 func GetClientIPWithMode(r *http.Request, mode TrustedProxy) string {
 	if mode == TrustedProxyCloudflare {
-		if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
-			return strings.TrimSpace(ip)
-		}
-		if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-			return strings.TrimSpace(strings.Split(ip, ",")[0])
+		if ip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); ip != "" {
+			if net.ParseIP(ip) != nil {
+				return ip
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

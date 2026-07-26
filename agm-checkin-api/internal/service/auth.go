@@ -89,6 +89,18 @@ func (s *AuthService) VerifyPINAndCreateToken(ip, pin, firstName, lastName strin
 			return nil
 		}
 
+		// The PIN was correct, so the strikes recorded against this IP are
+		// cleared.  maxPINAttempts is meant to count *consecutive* failures:
+		// without this reset the rows are permanent, so a shared desk IP that
+		// mistyped twice months ago is one typo away — forever — from being
+		// blocked outright, and the lockout stops tracking anything about the
+		// caller's current behaviour.  Clearing on success is safe: proving
+		// knowledge of the PIN is exactly the signal the counter exists to
+		// look for.
+		if err := tx.Where("ip_address = ?", ip).Delete(&db.PINAttempt{}).Error; err != nil {
+			return err
+		}
+
 		tokenBytes := make([]byte, 32)
 		if _, err := rand.Read(tokenBytes); err != nil {
 			return err
