@@ -54,6 +54,14 @@ func seedEvent(t *testing.T, database *gorm.DB, id string, current bool) {
 	}
 }
 
+func seedEventOn(t *testing.T, database *gorm.DB, id string, current bool, start time.Time) {
+	t.Helper()
+	event := db.Event{ID: id, Name: id, IsCurrent: current, StartDate: start, EndDate: start}
+	if err := database.Create(&event).Error; err != nil {
+		t.Fatalf("seeding event %s: %v", id, err)
+	}
+}
+
 func seedCompetitor(t *testing.T, database *gorm.DB, first, last, lastEvent string) db.Competitor {
 	t.Helper()
 	c := db.Competitor{NameFirst: first, NameLast: last, LastRegisteredEvent: lastEvent}
@@ -111,6 +119,86 @@ func TestGetAllScopesRegistrationUsersToCurrentEvent(t *testing.T) {
 	found = names(got)
 	if !found["Lovelace"] || !found["Hopper"] {
 		t.Errorf("admin should see every competitor, got %v", found)
+	}
+}
+
+// The reason for the whole conversion: last_registered_event is one string, so
+// it cannot say "registered for glr-2026 and nat-2026". Under the old filter a
+// returning competitor was invisible to registration staff until an import
+// rewrote that column, which is what made opening a new event manual work.
+func TestReturningCompetitorIsVisibleWithoutRewritingLastRegisteredEvent(t *testing.T) {
+	database, svc := newFixture(t)
+
+	seedEventOn(t, database, "glr-2026", false, time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC))
+	seedEventOn(t, database, "nat-2026", true, time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC))
+
+	// Deliberately stale: they attended glr-2026 and are on the nat-2026 roster,
+	// but nothing has rewritten the denormalized column.
+	returning := seedCompetitor(t, database, "Ada", "Lovelace", "glr-2026")
+	register(t, database, returning.ID, "glr-2026")
+	register(t, database, returning.ID, "nat-2026")
+
+	got, err := svc.GetAll("", false)
+	if err != nil {
+		t.Fatalf("GetAll(registration): %v", err)
+	}
+	if !names(got)["Lovelace"] {
+		t.Fatal("returning competitor is on the current roster but not visible to registration staff")
+	}
+	if got[0].MostRecentEvent != "nat-2026" {
+		t.Errorf("expected mostRecentEvent nat-2026, got %q", got[0].MostRecentEvent)
+	}
+}
+
+// Derived from event start dates, not from the stored column and not from a
+// hardcoded list of event slugs.
+func TestMostRecentEventIgnoresStaleStoredValue(t *testing.T) {
+	database, svc := newFixture(t)
+
+	seedEventOn(t, database, "nat-2026", true, time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC))
+	// A stub imported without dates, exactly as BulkImport creates them.
+	seedEventOn(t, database, "zzz-legacy", false, time.Time{})
+
+	c := seedCompetitor(t, database, "Grace", "Hopper", "zzz-legacy")
+	register(t, database, c.ID, "zzz-legacy")
+	register(t, database, c.ID, "nat-2026")
+
+	got, err := svc.GetByID(c.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.MostRecentEvent != "nat-2026" {
+		t.Errorf("undated stub should lose to a dated event, got %q", got.MostRecentEvent)
+	}
+}
+
+// Adding a competitor has to put them on a roster, or the visibility filter
+// hides them from the staff member who just created them.
+func TestCreateRegistersForSelectedEvent(t *testing.T) {
+	database, svc := newFixture(t)
+	seedEvent(t, database, "nat-2026", true)
+
+	c := db.Competitor{NameFirst: "Ada", NameLast: "Lovelace", LastRegisteredEvent: "nat-2026"}
+	if err := svc.Create(&c, "Alice Admin"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := svc.GetAll("", false)
+	if err != nil {
+		t.Fatalf("GetAll(registration): %v", err)
+	}
+	if !names(got)["Lovelace"] {
+		t.Error("newly created competitor is not visible to registration staff")
+	}
+
+	orphan := db.Competitor{NameFirst: "Grace", NameLast: "Hopper", LastRegisteredEvent: "no-such-event"}
+	if err := svc.Create(&orphan, "Alice Admin"); !errors.Is(err, ErrUnknownEvent) {
+		t.Errorf("expected ErrUnknownEvent, got %v", err)
+	}
+	var count int64
+	database.Model(&db.Competitor{}).Where("name_last = ?", "Hopper").Count(&count)
+	if count != 0 {
+		t.Error("failed registration should roll back the competitor row")
 	}
 }
 

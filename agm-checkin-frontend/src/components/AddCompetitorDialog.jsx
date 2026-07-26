@@ -148,11 +148,11 @@ export default function AddCompetitorDialog({ open, onClose, onCreated }) {
               </Select>
             </FormControl>
             <TextField
-              label="Last Registered Event"
+              label="Register For Event"
               value={form.lastRegisteredEvent}
               onChange={e => set('lastRegisteredEvent', e.target.value)}
               fullWidth
-              helperText="Auto-filled from current event"
+              helperText="Adds them to this event's roster. Auto-filled from current event."
             />
           </Box>
 

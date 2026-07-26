@@ -188,9 +188,9 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
                   />
                 )}
               </Box>
-              {competitor.lastRegisteredEvent && (
+              {competitor.mostRecentEvent && (
                 <Typography variant="caption" color="text.secondary">
-                  {competitor.lastRegisteredEvent}
+                  {competitor.mostRecentEvent}
                 </Typography>
               )}
             </Box>

@@ -48,7 +48,11 @@ func createCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 		}
 		actorID, actorName := actorFrom(r)
 		if err := svc.Create(&competitor, actorName); err != nil {
-			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			status := http.StatusInternalServerError
+			if errors.Is(err, service.ErrUnknownEvent) {
+				status = http.StatusBadRequest
+			}
+			respondJSON(w, status, map[string]string{"error": err.Error()})
 			return
 		}
 		audit.Log(service.LogEntry{
@@ -186,7 +190,11 @@ func updateCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 		actorID, actorName := actorFrom(r)
 		competitor, err := svc.Update(id, input, actorName)
 		if err != nil {
-			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			status := http.StatusInternalServerError
+			if errors.Is(err, service.ErrUnknownEvent) {
+				status = http.StatusBadRequest
+			}
+			respondJSON(w, status, map[string]string{"error": err.Error()})
 			return
 		}
 		audit.Log(service.LogEntry{

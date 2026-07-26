@@ -48,29 +48,35 @@ type FieldConflict struct {
 	ImportValue   string `json:"importValue"`
 }
 
-// eventOrder is the canonical chronological order for determining LastRegisteredEvent.
-var eventOrder = []string{"nat-2024", "glr-2025", "nat-2025", "glr-2026", "nat-2026"}
-
-func eventRank(id string) int {
-	for i, e := range eventOrder {
-		if e == id {
-			return i
-		}
+// eventChronology ranks every known event by start date, oldest first. Reading
+// this from the events table rather than a hardcoded list is the point: adding
+// an event is a data change, not a code change. Stub events imported without
+// dates carry the zero time and therefore rank oldest, so a dated event always
+// wins — which is what we want, since only the two current events have real
+// dates on file.
+func (s *CompetitorService) eventChronology() (map[string]int, error) {
+	var events []db.Event
+	if err := s.db.Order("start_date ASC, id ASC").Find(&events).Error; err != nil {
+		return nil, fmt.Errorf("loading event chronology: %w", err)
 	}
-	return -1
+	rank := make(map[string]int, len(events))
+	for i, e := range events {
+		rank[e.ID] = i
+	}
+	return rank, nil
 }
 
-// mostRecentEvent returns the most recent event ID from a list according to the canonical order.
-// Unknown event IDs are ranked last so they don't displace known ones.
-func mostRecentEvent(events []string) string {
+// mostRecentEvent returns the latest of the given event IDs. Events absent from
+// rank are unknown to the database and ignored.
+func mostRecentEvent(events []string, rank map[string]int) string {
 	best := ""
-	bestRank := -2
+	bestRank := 0
 	for _, e := range events {
-		r := eventRank(e)
-		if r == -1 {
-			r = len(eventOrder) // treat unknown as after all known
+		r, known := rank[e]
+		if !known {
+			continue
 		}
-		if r > bestRank {
+		if best == "" || r > bestRank {
 			bestRank = r
 			best = e
 		}
@@ -135,6 +141,12 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 			}
 			result.EventsCreated++
 		}
+	}
+
+	// Loaded after stub creation so freshly created events are ranked too.
+	eventRank, err := s.eventChronology()
+	if err != nil {
+		return nil, err
 	}
 
 	// --- 4. Classify each row: match existing competitor or create new. ---
@@ -202,8 +214,8 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 			}
 
 			// Update lastRegisteredEvent when incoming events include something newer.
-			if incoming := mostRecentEvent(row.Events); incoming != "" &&
-				eventRank(incoming) > eventRank(existing.LastRegisteredEvent) {
+			if incoming := mostRecentEvent(row.Events, eventRank); incoming != "" &&
+				eventRank[incoming] > eventRank[existing.LastRegisteredEvent] {
 				autoFill["last_registered_event"] = incoming
 			}
 
@@ -266,7 +278,7 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 			DobVerifiedBy:       verifiedBy,
 			RequiresValidation:  row.RequiresValidation,
 			Validated:           row.Validated,
-			LastRegisteredEvent: mostRecentEvent(row.Events),
+			LastRegisteredEvent: mostRecentEvent(row.Events, eventRank),
 		})
 		toCreateIdx = append(toCreateIdx, i)
 	}
@@ -336,6 +348,11 @@ func eventDisplayName(id string) string {
 type CompetitorWithCheckIn struct {
 	db.Competitor
 	CurrentCheckIn *db.CompetitorEvent `json:"currentCheckIn"`
+
+	// MostRecentEvent is derived from competitor_events on every read rather
+	// than stored, so it cannot drift from the attendance rows the way
+	// LastRegisteredEvent did.
+	MostRecentEvent string `json:"mostRecentEvent"`
 }
 
 // CompetitorEventWithEvent is used for the per-competitor history endpoint.
@@ -367,11 +384,17 @@ func (s *CompetitorService) GetAll(search string, adminView bool) ([]CompetitorW
 	query := s.db.Model(&db.Competitor{})
 
 	// Registration users only see competitors registered for the current event.
+	// Registration is an attendance row, not a column on the competitor: a
+	// single text field cannot express being registered for two events at once,
+	// which is what forced a full re-import to open every new event.
 	if !adminView {
 		if eventID == "" {
 			return []CompetitorWithCheckIn{}, nil
 		}
-		query = query.Where("last_registered_event = ?", eventID)
+		query = query.Where(
+			"EXISTS (SELECT 1 FROM competitor_events ce WHERE ce.competitor_id = competitors.id AND ce.event_id = ?)",
+			eventID,
+		)
 	}
 
 	if search != "" {
@@ -394,13 +417,14 @@ func (s *CompetitorService) GetAll(search string, adminView bool) ([]CompetitorW
 		return []CompetitorWithCheckIn{}, nil
 	}
 
+	ids := make([]string, len(competitors))
+	for i, c := range competitors {
+		ids[i] = c.ID
+	}
+
 	// Attach current-event check-in records.
 	checkInMap := map[string]*db.CompetitorEvent{}
 	if eventID != "" {
-		ids := make([]string, len(competitors))
-		for i, c := range competitors {
-			ids[i] = c.ID
-		}
 		var checkIns []db.CompetitorEvent
 		if err := s.db.Where("competitor_id IN ? AND event_id = ?", ids, eventID).Find(&checkIns).Error; err != nil {
 			return nil, err
@@ -411,14 +435,47 @@ func (s *CompetitorService) GetAll(search string, adminView bool) ([]CompetitorW
 		}
 	}
 
+	recentMap, err := s.mostRecentEvents(ids)
+	if err != nil {
+		return nil, err
+	}
+
 	result := make([]CompetitorWithCheckIn, len(competitors))
 	for i, c := range competitors {
 		result[i] = CompetitorWithCheckIn{
-			Competitor:     c,
-			CurrentCheckIn: checkInMap[c.ID],
+			Competitor:      c,
+			CurrentCheckIn:  checkInMap[c.ID],
+			MostRecentEvent: recentMap[c.ID],
 		}
 	}
 	return result, nil
+}
+
+// mostRecentEvents resolves each competitor's latest event by start date. Stub
+// events with no date on file carry the zero time and so lose to any dated
+// event, which matches how the roster is actually ordered.
+func (s *CompetitorService) mostRecentEvents(competitorIDs []string) (map[string]string, error) {
+	if len(competitorIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	var rows []struct {
+		CompetitorID string
+		EventID      string
+	}
+	if err := s.db.Raw(`
+		SELECT DISTINCT ON (ce.competitor_id) ce.competitor_id, ce.event_id
+		FROM competitor_events ce
+		JOIN events e ON e.id = ce.event_id
+		WHERE ce.competitor_id IN ?
+		ORDER BY ce.competitor_id, e.start_date DESC, ce.event_id DESC
+	`, competitorIDs).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("resolving most recent events: %w", err)
+	}
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[r.CompetitorID] = r.EventID
+	}
+	return out, nil
 }
 
 func (s *CompetitorService) GetByID(id string) (*CompetitorWithCheckIn, error) {
@@ -436,12 +493,42 @@ func (s *CompetitorService) GetByID(id string) (*CompetitorWithCheckIn, error) {
 			result.CurrentCheckIn = &ce
 		}
 	}
+
+	recentMap, err := s.mostRecentEvents([]string{competitor.ID})
+	if err != nil {
+		return nil, err
+	}
+	result.MostRecentEvent = recentMap[competitor.ID]
 	return result, nil
 }
 
 func (s *CompetitorService) Create(competitor *db.Competitor, staffName string) error {
 	applyDobVerification(competitor, nil, staffName)
-	return s.db.Create(competitor).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(competitor).Error; err != nil {
+			return err
+		}
+		return registerForEvent(tx, competitor.ID, competitor.LastRegisteredEvent)
+	})
+}
+
+// registerForEvent puts a competitor on an event roster if they are not on it
+// already. Attendance rows are what make someone visible to registration staff,
+// so adding or editing a competitor has to write one — setting the event field
+// alone would leave them registered on paper and invisible in the app.
+func registerForEvent(tx *gorm.DB, competitorID, eventID string) error {
+	if eventID == "" {
+		return nil
+	}
+	var known int64
+	if err := tx.Model(&db.Event{}).Where("id = ?", eventID).Count(&known).Error; err != nil {
+		return fmt.Errorf("checking event %s: %w", eventID, err)
+	}
+	if known == 0 {
+		return fmt.Errorf("%w: %s", ErrUnknownEvent, eventID)
+	}
+	ce := db.CompetitorEvent{CompetitorID: competitorID, EventID: eventID}
+	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&ce).Error
 }
 
 func (s *CompetitorService) CheckIn(id string, staffName string) (*CompetitorWithCheckIn, error) {
@@ -464,31 +551,49 @@ func (s *CompetitorService) CheckIn(id string, staffName string) (*CompetitorWit
 		CheckedInBy:     staffName,
 	}
 
-	if err := s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "competitor_id"}, {Name: "event_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"checked_in", "check_in_datetime", "checked_in_by"}),
-	}).Create(&ce).Error; err != nil {
+	// Both writes in one transaction: a check-in recorded without its matching
+	// registration update is the drift this conversion exists to remove
+	// (DB_REVIEW finding 3).
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "competitor_id"}, {Name: "event_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"checked_in", "check_in_datetime", "checked_in_by"}),
+		}).Create(&ce).Error; err != nil {
+			return err
+		}
+
+		// Reload the stored row. On the conflict path BeforeCreate has already
+		// overwritten ce.ID with a freshly generated UUID that was never persisted,
+		// and GORM would otherwise use that stale primary key as a query condition.
+		ce.ID = ""
+		if err := tx.Where("competitor_id = ? AND event_id = ?", id, eventID).First(&ce).Error; err != nil {
+			return fmt.Errorf("reloading check-in record: %w", err)
+		}
+
+		// Nothing reads last_registered_event any more, but it is kept current so
+		// this phase can be rolled back without stranding anyone checked in during
+		// the window. Migration 004 drops the column.
+		if competitor.LastRegisteredEvent != eventID {
+			if err := tx.Model(&competitor).Update("last_registered_event", eventID).Error; err != nil {
+				return fmt.Errorf("updating last registered event: %w", err)
+			}
+			competitor.LastRegisteredEvent = eventID
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 
-	// Reload the stored row. On the conflict path BeforeCreate has already
-	// overwritten ce.ID with a freshly generated UUID that was never persisted,
-	// and GORM would otherwise use that stale primary key as a query condition.
-	ce.ID = ""
-	if err := s.db.Where("competitor_id = ? AND event_id = ?", id, eventID).First(&ce).Error; err != nil {
-		return nil, fmt.Errorf("reloading check-in record: %w", err)
+	recentMap, err := s.mostRecentEvents([]string{id})
+	if err != nil {
+		return nil, err
 	}
 
-	// Keep lastRegisteredEvent in sync so the competitor stays visible
-	// to registration users for this event.
-	if competitor.LastRegisteredEvent != eventID {
-		if err := s.db.Model(&competitor).Update("last_registered_event", eventID).Error; err != nil {
-			return nil, fmt.Errorf("updating last registered event: %w", err)
-		}
-		competitor.LastRegisteredEvent = eventID
-	}
-
-	return &CompetitorWithCheckIn{Competitor: competitor, CurrentCheckIn: &ce}, nil
+	return &CompetitorWithCheckIn{
+		Competitor:      competitor,
+		CurrentCheckIn:  &ce,
+		MostRecentEvent: recentMap[id],
+	}, nil
 }
 
 func (s *CompetitorService) UpdateDOB(id string, dob time.Time) (*db.Competitor, error) {
@@ -564,7 +669,12 @@ func (s *CompetitorService) Update(id string, input db.Competitor, staffName str
 	}
 	input.ID = competitor.ID
 	applyDobVerification(&input, &competitor, staffName)
-	if err := s.db.Save(&input).Error; err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&input).Error; err != nil {
+			return err
+		}
+		return registerForEvent(tx, input.ID, input.LastRegisteredEvent)
+	}); err != nil {
 		return nil, err
 	}
 	return &input, nil
@@ -612,6 +722,10 @@ func (s *CompetitorService) GetEventHistory(competitorID string) ([]CompetitorEv
 
 // ErrNotFound is returned when a competitor record does not exist.
 var ErrNotFound = errors.New("competitor not found")
+
+// ErrUnknownEvent is returned when a competitor is assigned to an event ID that
+// does not exist, which would otherwise surface as a foreign key violation.
+var ErrUnknownEvent = errors.New("unknown event")
 
 // applyDobVerification resolves the verification state the client asked for
 // against what is already stored. The client only gets to say whether the

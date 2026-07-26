@@ -168,10 +168,10 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
               </Select>
             </FormControl>
             <FormControl fullWidth>
-              <InputLabel>Last Registered Event</InputLabel>
+              <InputLabel>Register For Event</InputLabel>
               <Select
                 value={form.lastRegisteredEvent ?? ''}
-                label="Last Registered Event"
+                label="Register For Event"
                 onChange={e => set('lastRegisteredEvent', e.target.value)}
               >
                 <MenuItem value=""><em>None</em></MenuItem>

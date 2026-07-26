@@ -51,7 +51,7 @@ const SHIRT_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
 // sort: null means the column is not sortable.
 const COLUMNS = [
   { key: 'name',        sort: 'nameLast',           label: 'Name' },
-  { key: 'event',       sort: 'lastRegisteredEvent', label: 'Event' },
+  { key: 'event',       sort: 'mostRecentEvent',     label: 'Event' },
   { key: 'studio',      sort: 'studio',              label: 'Studio' },
   { key: 'teacher',     sort: 'teacher',             label: 'Teacher' },
   { key: 'shirt',       sort: 'shirtSize',           label: 'Shirt' },
@@ -198,7 +198,7 @@ export default function CompetitorsPage() {
 
   // Events present in the loaded competitor data, ordered by start_date from the API
   const availableEvents = useMemo(() => {
-    const found = new Set(competitors.map(c => c.lastRegisteredEvent).filter(Boolean))
+    const found = new Set(competitors.map(c => c.mostRecentEvent).filter(Boolean))
     return events.filter(e => found.has(e.id)).reverse()
   }, [competitors, events])
 
@@ -303,7 +303,7 @@ export default function CompetitorsPage() {
         (c.shirtSize || '').toLowerCase().includes(q)
       )
     }
-    if (filterEvent)   list = list.filter(c => c.lastRegisteredEvent === filterEvent)
+    if (filterEvent)   list = list.filter(c => c.mostRecentEvent === filterEvent)
     if (filterStudio)  list = list.filter(c => c.studio === filterStudio)
     if (filterTeacher) list = list.filter(c => c.teacher === filterTeacher)
     if (filterShirt)   list = list.filter(c => c.shirtSize === filterShirt)
@@ -476,9 +476,9 @@ export default function CompetitorsPage() {
                       <Typography variant="body2" color="text.secondary" noWrap>
                         {competitor.teacher || '—'}
                       </Typography>
-                      {competitor.lastRegisteredEvent && (
+                      {competitor.mostRecentEvent && (
                         <Typography variant="caption" color="text.secondary" noWrap display="block">
-                          {competitor.lastRegisteredEvent}
+                          {competitor.mostRecentEvent}
                         </Typography>
                       )}
                     </Box>
@@ -576,7 +576,7 @@ export default function CompetitorsPage() {
                       )}
                       {vis('event') && (
                         <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                          {competitor.lastRegisteredEvent || '—'}
+                          {competitor.mostRecentEvent || '—'}
                         </TableCell>
                       )}
                       {vis('studio') && (

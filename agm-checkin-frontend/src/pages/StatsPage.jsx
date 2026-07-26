@@ -97,9 +97,10 @@ export default function StatsPage() {
     fetchData()
   }, [fetchData])
 
-  // Only count competitors registered for the current event
+  // Registered for the current event means having an attendance row for it,
+  // which is exactly what the API returns as currentCheckIn.
   const current = currentEvent
-    ? competitors.filter(c => c.lastRegisteredEvent === currentEvent.id)
+    ? competitors.filter(c => c.currentCheckIn)
     : []
 
   const total = current.length
