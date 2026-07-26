@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 	authmw "johndpete316/agm-checkin-api/internal/middleware"
 	"johndpete316/agm-checkin-api/internal/service"
 )
+
+// maxRequestBody caps a competitor edit body. The handler buffers it whole to
+// read the key set, so the cap is what keeps that buffer bounded. A competitor
+// record is a few hundred bytes; 1 MiB is generous and still finite.
+const maxRequestBody = 1 << 20
 
 func listCompetitors(svc *service.CompetitorService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +56,7 @@ func createCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 		actorID, actorName := actorFrom(r)
 		if err := svc.Create(&competitor, actorName); err != nil {
 			status := http.StatusInternalServerError
-			if errors.Is(err, service.ErrUnknownEvent) {
+			if errors.Is(err, service.ErrUnknownEvent) || errors.Is(err, service.ErrBlankName) {
 				status = http.StatusBadRequest
 			}
 			respondJSON(w, status, map[string]string{"error": err.Error()})
@@ -183,16 +189,39 @@ func validateCompetitor(svc *service.CompetitorService, audit *service.AuditServ
 func updateCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		var input db.Competitor
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+
+		// The body is read whole rather than streamed into the struct: a PATCH
+		// has to distinguish a field sent as empty from a field not sent at all,
+		// and the decoded struct cannot say which of its zero values came from
+		// the wire. The key set does, so it is decoded alongside.
+		raw, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBody))
+		if err != nil {
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
+		var input db.Competitor
+		if err := json.Unmarshal(raw, &input); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		var keys map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &keys); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		present := make(map[string]bool, len(keys))
+		for k := range keys {
+			present[k] = true
+		}
+
 		actorID, actorName := actorFrom(r)
-		competitor, err := svc.Update(id, input, actorName)
+		competitor, err := svc.Update(id, input, present, actorName)
 		if err != nil {
 			status := http.StatusInternalServerError
-			if errors.Is(err, service.ErrUnknownEvent) {
+			switch {
+			case errors.Is(err, service.ErrNotFound):
+				status = http.StatusNotFound
+			case errors.Is(err, service.ErrUnknownEvent), errors.Is(err, service.ErrBlankName):
 				status = http.StatusBadRequest
 			}
 			respondJSON(w, status, map[string]string{"error": err.Error()})

@@ -509,6 +509,9 @@ func (s *CompetitorService) GetByID(id string) (*CompetitorWithCheckIn, error) {
 }
 
 func (s *CompetitorService) Create(competitor *db.Competitor, staffName string) error {
+	if strings.TrimSpace(competitor.NameFirst) == "" || strings.TrimSpace(competitor.NameLast) == "" {
+		return ErrBlankName
+	}
 	applyDobVerification(competitor, nil, staffName)
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(competitor).Error; err != nil {
@@ -656,22 +659,92 @@ func (s *CompetitorService) UpdateContact(id string, note *string, email *string
 	return &competitor, nil
 }
 
-func (s *CompetitorService) Update(id string, input db.Competitor, staffName string) (*db.Competitor, error) {
+// updatableFields lists the JSON keys an admin edit may carry, the column each
+// writes, and where to read the value from the decoded body. Key, column and
+// value are declared together so none of the three can drift out of step with
+// the others — a mismatch would write a NULL over a live column.
+//
+// Anything not listed here is not client-settable at all. dobVerifiedAt and
+// dobVerifiedBy are deliberately absent: they are handled separately because
+// their values are decided by the server, not taken from the body.
+var updatableFields = []struct {
+	key    string
+	column string
+	value  func(*db.Competitor) any
+}{
+	{"nameFirst", "name_first", func(c *db.Competitor) any { return c.NameFirst }},
+	{"nameLast", "name_last", func(c *db.Competitor) any { return c.NameLast }},
+	{"dateOfBirth", "date_of_birth", func(c *db.Competitor) any { return c.DateOfBirth }},
+	{"shirtSize", "shirt_size", func(c *db.Competitor) any { return c.ShirtSize }},
+	{"email", "email", func(c *db.Competitor) any { return c.Email }},
+	{"teacher", "teacher", func(c *db.Competitor) any { return c.Teacher }},
+	{"studio", "studio", func(c *db.Competitor) any { return c.Studio }},
+	{"note", "note", func(c *db.Competitor) any { return c.Note }},
+}
+
+// Update applies an admin edit. present names the JSON keys the request body
+// actually carried; only those columns are written.
+//
+// The previous implementation called Save(), which writes every column of the
+// decoded struct. A body carrying one field therefore wrote the Go zero value
+// over every other column: a PATCH of just nameFirst blanked the surname, the
+// date of birth, the shirt size, the email, the studio, the teacher, the staff
+// note, and the verification stamp. Distinguishing "absent" from "sent as
+// empty" is the whole point of a PATCH, and only the raw body can tell them
+// apart, so the handler passes the key set down rather than the service
+// guessing from zero values.
+func (s *CompetitorService) Update(id string, input db.Competitor, present map[string]bool, staffName string) (*db.Competitor, error) {
 	var competitor db.Competitor
 	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
-	input.ID = competitor.ID
-	applyDobVerification(&input, &competitor, staffName)
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&input).Error; err != nil {
-			return err
+
+	updates := map[string]any{}
+	for _, f := range updatableFields {
+		if present[f.key] {
+			updates[f.column] = f.value(&input)
 		}
-		return registerForEvent(tx, input.ID, input.RegisterForEvent)
+	}
+
+	// A name may be corrected but not erased: a competitor with no name is
+	// unsearchable, unmatchable on import, and blank on every screen.
+	if present["nameFirst"] && strings.TrimSpace(input.NameFirst) == "" {
+		return nil, ErrBlankName
+	}
+	if present["nameLast"] && strings.TrimSpace(input.NameLast) == "" {
+		return nil, ErrBlankName
+	}
+
+	// Verification provenance is server-owned, so it moves only when the caller
+	// said something about it. Sending dobVerifiedAt as null revokes; sending
+	// any non-null value asks for a stamp, and when and by whom are decided here.
+	if present["dobVerifiedAt"] {
+		applyDobVerification(&input, &competitor, staffName)
+		updates["dob_verified_at"] = input.DobVerifiedAt
+		updates["dob_verified_by"] = input.DobVerifiedBy
+	}
+
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if len(updates) > 0 {
+			if err := tx.Model(&db.Competitor{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		return registerForEvent(tx, id, input.RegisterForEvent)
 	}); err != nil {
 		return nil, err
 	}
-	return &input, nil
+
+	var updated db.Competitor
+	if err := s.db.First(&updated, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	// Request-only field, carried back so the caller can audit what was asked for.
+	updated.RegisterForEvent = input.RegisterForEvent
+	return &updated, nil
 }
 
 func (s *CompetitorService) Delete(id string) error {
@@ -720,6 +793,11 @@ var ErrNotFound = errors.New("competitor not found")
 // ErrUnknownEvent is returned when a competitor is assigned to an event ID that
 // does not exist, which would otherwise surface as a foreign key violation.
 var ErrUnknownEvent = errors.New("unknown event")
+
+// ErrBlankName is returned when a create or edit would leave a competitor with
+// no usable name. NOT NULL cannot express this — Postgres treats '' as a value —
+// so the rule lives here.
+var ErrBlankName = errors.New("first and last name are required")
 
 // applyDobVerification resolves the verification state the client asked for
 // against what is already stored. The client only gets to say whether the

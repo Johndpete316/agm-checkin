@@ -388,6 +388,15 @@ func TestValidateIsIdempotentAndRecordsProvenance(t *testing.T) {
 	}
 }
 
+// fields builds the key set a PATCH body would have carried.
+func fields(keys ...string) map[string]bool {
+	out := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		out[k] = true
+	}
+	return out
+}
+
 // The client may say whether a competitor is verified, never when or by whom.
 func TestUpdateDoesNotLetClientsForgeVerificationProvenance(t *testing.T) {
 	database, svc := newFixture(t)
@@ -400,7 +409,7 @@ func TestUpdateDoesNotLetClientsForgeVerificationProvenance(t *testing.T) {
 		NameLast:      "Hopper",
 		DobVerifiedAt: &forged,
 		DobVerifiedBy: "Somebody Else",
-	}, "Alice Admin")
+	}, fields("nameFirst", "nameLast", "dobVerifiedAt", "dobVerifiedBy"), "Alice Admin")
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -411,12 +420,172 @@ func TestUpdateDoesNotLetClientsForgeVerificationProvenance(t *testing.T) {
 		t.Errorf("expected verifier Alice Admin, got %q", got.DobVerifiedBy)
 	}
 
-	cleared, err := svc.Update(c.ID, db.Competitor{NameFirst: "Grace", NameLast: "Hopper"}, "Alice Admin")
+	// Revoking is an explicit null, not an omission — the caller has to name the
+	// field to clear it.
+	cleared, err := svc.Update(c.ID, db.Competitor{NameFirst: "Grace", NameLast: "Hopper"},
+		fields("nameFirst", "nameLast", "dobVerifiedAt"), "Alice Admin")
 	if err != nil {
 		t.Fatalf("clearing Update: %v", err)
 	}
 	if cleared.DobVerifiedAt != nil {
 		t.Error("expected admin to be able to revoke verification")
+	}
+}
+
+// A PATCH carrying one field must write one field. Save() wrote the whole
+// struct, so a body of {"nameFirst": ...} silently blanked the surname, the date
+// of birth, the shirt size, the email, the studio, the teacher, the staff note,
+// and the verification stamp — every one of which is re-collected only by
+// asking the competitor again at the desk.
+func TestUpdateLeavesOmittedFieldsAlone(t *testing.T) {
+	database, svc := newFixture(t)
+
+	dob := time.Date(2005, 3, 15, 0, 0, 0, 0, time.UTC)
+	c := db.Competitor{
+		NameFirst:   "Ada",
+		NameLast:    "Lovelace",
+		DateOfBirth: dob,
+		ShirtSize:   "M",
+		Email:       "ada@example.com",
+		Teacher:     "T One",
+		Studio:      "S One",
+		Note:        "needs step-free access",
+	}
+	if err := database.Create(&c).Error; err != nil {
+		t.Fatalf("seeding competitor: %v", err)
+	}
+	verified, err := svc.Validate(c.ID, "Alice Admin")
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	got, err := svc.Update(c.ID, db.Competitor{NameFirst: "Adaline"}, fields("nameFirst"), "Bob Staff")
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	if got.NameFirst != "Adaline" {
+		t.Errorf("NameFirst = %q, want Adaline", got.NameFirst)
+	}
+	for _, f := range []struct{ name, got, want string }{
+		{"NameLast", got.NameLast, "Lovelace"},
+		{"ShirtSize", got.ShirtSize, "M"},
+		{"Email", got.Email, "ada@example.com"},
+		{"Teacher", got.Teacher, "T One"},
+		{"Studio", got.Studio, "S One"},
+		{"Note", got.Note, "needs step-free access"},
+		{"DobVerifiedBy", got.DobVerifiedBy, "Alice Admin"},
+	} {
+		if f.got != f.want {
+			t.Errorf("%s = %q, want %q — omitted field was overwritten", f.name, f.got, f.want)
+		}
+	}
+	if !got.DateOfBirth.Equal(dob) {
+		t.Errorf("DateOfBirth = %v, want %v — omitted field was overwritten", got.DateOfBirth, dob)
+	}
+	if got.DobVerifiedAt == nil {
+		t.Fatal("DobVerifiedAt was cleared by an edit that never mentioned it")
+	}
+	if !got.DobVerifiedAt.Equal(*verified.DobVerifiedAt) {
+		t.Errorf("DobVerifiedAt = %v, want %v", got.DobVerifiedAt, verified.DobVerifiedAt)
+	}
+}
+
+// The other half of the contract: a field the caller did send as empty must be
+// written as empty, or an admin can never clear a stale note or a wrong email.
+func TestUpdateWritesFieldsSentAsEmpty(t *testing.T) {
+	database, svc := newFixture(t)
+
+	c := db.Competitor{NameFirst: "Ada", NameLast: "Lovelace", Email: "stale@example.com", Note: "old note"}
+	if err := database.Create(&c).Error; err != nil {
+		t.Fatalf("seeding competitor: %v", err)
+	}
+
+	got, err := svc.Update(c.ID, db.Competitor{Email: "", Note: ""}, fields("email", "note"), "Alice Admin")
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got.Email != "" || got.Note != "" {
+		t.Errorf("explicitly emptied fields were not cleared: email=%q note=%q", got.Email, got.Note)
+	}
+	if got.NameLast != "Lovelace" {
+		t.Errorf("NameLast = %q, want Lovelace", got.NameLast)
+	}
+}
+
+// Roster membership is attendance rows, not a column, so an edit must not be
+// able to drop one. registerForEvent only ever adds.
+func TestUpdateKeepsRosterMembership(t *testing.T) {
+	database, svc := newFixture(t)
+
+	seedEventOn(t, database, "glr-2026", false, time.Date(2026, 4, 17, 0, 0, 0, 0, time.UTC))
+	seedEventOn(t, database, "nat-2026", true, time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC))
+
+	c := seedCompetitor(t, database, "Ada", "Lovelace")
+	register(t, database, c.ID, "glr-2026")
+	register(t, database, c.ID, "nat-2026")
+
+	if _, err := svc.Update(c.ID, db.Competitor{NameFirst: "Adaline"}, fields("nameFirst"), "Alice Admin"); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	var events []string
+	if err := database.Model(&db.CompetitorEvent{}).
+		Where("competitor_id = ?", c.ID).Order("event_id").Pluck("event_id", &events).Error; err != nil {
+		t.Fatalf("reading roster: %v", err)
+	}
+	if !slices.Equal(events, []string{"glr-2026", "nat-2026"}) {
+		t.Errorf("roster after edit = %v, want both events", events)
+	}
+
+	// An unknown event is rejected rather than silently registering nothing.
+	if _, err := svc.Update(c.ID, db.Competitor{RegisterForEvent: "no-such-event"},
+		fields(), "Alice Admin"); !errors.Is(err, ErrUnknownEvent) {
+		t.Errorf("expected ErrUnknownEvent, got %v", err)
+	}
+}
+
+// A competitor with no name is unsearchable, blank on every screen, and
+// collides with every other nameless row on the import name key.
+func TestCreateAndUpdateRejectBlankNames(t *testing.T) {
+	database, svc := newFixture(t)
+
+	for _, tc := range []struct{ name, first, last string }{
+		{"both empty", "", ""},
+		{"whitespace only", "   ", "\t\n"},
+		{"missing surname", "Ada", ""},
+	} {
+		c := db.Competitor{NameFirst: tc.first, NameLast: tc.last}
+		if err := svc.Create(&c, "Alice Admin"); !errors.Is(err, ErrBlankName) {
+			t.Errorf("Create(%s): expected ErrBlankName, got %v", tc.name, err)
+		}
+	}
+	var created int64
+	database.Model(&db.Competitor{}).Count(&created)
+	if created != 0 {
+		t.Errorf("%d nameless competitors were created", created)
+	}
+
+	existing := seedCompetitor(t, database, "Ada", "Lovelace")
+	if _, err := svc.Update(existing.ID, db.Competitor{NameLast: "  "},
+		fields("nameLast"), "Alice Admin"); !errors.Is(err, ErrBlankName) {
+		t.Errorf("Update: expected ErrBlankName, got %v", err)
+	}
+	var after db.Competitor
+	database.First(&after, "id = ?", existing.ID)
+	if after.NameLast != "Lovelace" {
+		t.Errorf("rejected edit still wrote: NameLast = %q", after.NameLast)
+	}
+}
+
+// Editing a competitor who is already gone is a 404 case, not a 500.
+func TestUpdateReturnsNotFoundForMissingCompetitor(t *testing.T) {
+	_, svc := newFixture(t)
+
+	_, err := svc.Update("00000000-0000-0000-0000-000000000000",
+		db.Competitor{NameFirst: "Ghost"}, fields("nameFirst"), "Alice Admin")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
 
