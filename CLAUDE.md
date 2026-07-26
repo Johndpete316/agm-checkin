@@ -82,15 +82,15 @@ Endpoints marked **Admin** additionally require `RequireAdmin` middleware (role 
 | POST | `/api/auth/token` | None | Verify access code + register name → returns bearer token + role |
 | GET | `/api/auth/me` | Required | Returns current staff token info (used for role sync on page focus) |
 | GET | `/api/competitors` | Required | List competitors; `?search=` for name search; registration users only see competitors registered for the current event |
-| GET | `/api/competitors/{id}` | Required | Get single competitor with current-event check-in record |
+| GET | `/api/competitors/{id}` | Required | Get single competitor with current-event check-in record; registration users get 404 for anyone off the current event's roster |
 | POST | `/api/competitors` | Required | Create competitor |
 | PATCH | `/api/competitors/{id}` | Admin | Update all competitor fields (including `note`) |
 | PATCH | `/api/competitors/{id}/checkin` | Required | Mark checked in for current event (upserts the `competitor_events` row) |
 | PATCH | `/api/competitors/{id}/contact` | Required | Update `note` and/or `email` `{"note": "...", "email": "..."}` (both optional); available to all roles |
 | PATCH | `/api/competitors/{id}/dob` | Required | Update date of birth `{"dateOfBirth": "2005-03-15T00:00:00Z"}` |
 | PATCH | `/api/competitors/{id}/validate` | Required | Record that the DOB was checked against ID (stamps `dobVerifiedAt` / `dobVerifiedBy`); idempotent |
-| DELETE | `/api/competitors/{id}` | Required | Delete competitor |
-| GET | `/api/competitors/{id}/events` | Required | Full event history for a competitor |
+| DELETE | `/api/competitors/{id}` | Admin | Delete competitor (cascades their attendance for every event) |
+| GET | `/api/competitors/{id}/events` | Required | Full event history for a competitor; registration users get 404 for anyone off the current event's roster |
 | POST | `/api/competitors/import` | Admin | Bulk import from normalized CSV upload (multipart `file` field); creates DB snapshot before writing |
 | GET | `/api/events` | Required | List all events (sorted by start_date desc) |
 | GET | `/api/events/current` | Required | Get the current event |

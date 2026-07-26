@@ -110,7 +110,6 @@ func main() {
 		r.Patch("/api/competitors/{id}/contact", updateCompetitorContact(competitorSvc, auditSvc))
 		r.Patch("/api/competitors/{id}/dob", updateDOB(competitorSvc, auditSvc))
 		r.Patch("/api/competitors/{id}/validate", validateCompetitor(competitorSvc, auditSvc))
-		r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc, auditSvc))
 		r.Get("/api/competitors/{id}/events", getCompetitorEvents(competitorSvc))
 		r.Get("/api/competitors/{id}/schedule", getCompetitorSchedule(scheduleSvc, eventSvc))
 
@@ -120,6 +119,13 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.RequireAdmin)
 			r.Patch("/api/competitors/{id}", updateCompetitor(competitorSvc, auditSvc))
+
+			// Deleting a competitor cascades their whole attendance history for
+			// every event, not just the one being staffed. It sat outside this
+			// group while the far milder edit beside it was admin-only, so a
+			// registration token could destroy records it was not allowed to
+			// change. No caller in the frontend uses it.
+			r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc, auditSvc))
 
 			r.Post("/api/events", createEvent(eventSvc, auditSvc))
 			r.Patch("/api/events/{id}/current", setCurrentEvent(eventSvc, auditSvc))

@@ -13,13 +13,19 @@ import (
 	"johndpete316/agm-checkin-api/internal/service"
 )
 
+// adminView reports whether the caller may see competitors outside the current
+// event's roster. Every competitor read derives its scope from this one place so
+// a new route cannot accidentally ship unscoped.
+func adminView(r *http.Request) bool {
+	staff := authmw.StaffFromContext(r.Context())
+	return staff != nil && staff.Role == "admin"
+}
+
 func listCompetitors(svc *service.CompetitorService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		search := r.URL.Query().Get("search")
 		eventScope := r.URL.Query().Get("eventId")
-		staff := authmw.StaffFromContext(r.Context())
-		adminView := staff != nil && staff.Role == "admin"
-		competitors, err := svc.GetAll(search, adminView, eventScope)
+		competitors, err := svc.GetAll(search, adminView(r), eventScope)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -31,7 +37,7 @@ func listCompetitors(svc *service.CompetitorService) http.HandlerFunc {
 func getCompetitor(svc *service.CompetitorService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		competitor, err := svc.GetByID(id)
+		competitor, err := svc.GetByID(id, adminView(r))
 		if err != nil {
 			respondJSON(w, http.StatusNotFound, map[string]string{"error": "competitor not found"})
 			return
@@ -219,7 +225,7 @@ func updateCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 func deleteCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		existing, _ := svc.GetByID(id)
+		existing, _ := svc.GetByID(id, adminView(r))
 		if err := svc.Delete(id); err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -245,8 +251,12 @@ func deleteCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 func getCompetitorEvents(svc *service.CompetitorService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		history, err := svc.GetEventHistory(id)
+		history, err := svc.GetEventHistory(id, adminView(r))
 		if err != nil {
+			if errors.Is(err, service.ErrNotFound) {
+				respondJSON(w, http.StatusNotFound, map[string]string{"error": "competitor not found"})
+				return
+			}
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}

@@ -484,15 +484,46 @@ func (s *CompetitorService) mostRecentEvents(competitorIDs []string) (map[string
 	return out, nil
 }
 
-func (s *CompetitorService) GetByID(id string) (*CompetitorWithCheckIn, error) {
+// onRoster reports whether a competitor has an attendance row for an event. A
+// blank event ID means no event is current, and with no current event nobody is
+// on a roster — the same answer GetAll gives by returning an empty list.
+func (s *CompetitorService) onRoster(competitorID, eventID string) (bool, error) {
+	if eventID == "" {
+		return false, nil
+	}
+	var count int64
+	if err := s.db.Model(&db.CompetitorEvent{}).
+		Where("competitor_id = ? AND event_id = ?", competitorID, eventID).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// GetByID returns one competitor. Registration users are held to the same roster
+// boundary the list applies: scoping only the list would leave holding a UUID —
+// which staff keep from every past event they worked — enough to pull a full
+// record, date of birth and email included, for someone outside the event they
+// are staffing.
+func (s *CompetitorService) GetByID(id string, adminView bool) (*CompetitorWithCheckIn, error) {
 	var competitor db.Competitor
 	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
 
+	eventID := s.currentEventID()
+	if !adminView {
+		visible, err := s.onRoster(id, eventID)
+		if err != nil {
+			return nil, err
+		}
+		if !visible {
+			return nil, ErrNotFound
+		}
+	}
+
 	result := &CompetitorWithCheckIn{Competitor: competitor}
 
-	eventID := s.currentEventID()
 	if eventID != "" {
 		var ce db.CompetitorEvent
 		if err := s.db.Where("competitor_id = ? AND event_id = ?", id, eventID).First(&ce).Error; err == nil {
@@ -678,7 +709,21 @@ func (s *CompetitorService) Delete(id string) error {
 	return s.db.Delete(&db.Competitor{}, "id = ?", id).Error
 }
 
-func (s *CompetitorService) GetEventHistory(competitorID string) ([]CompetitorEventWithEvent, error) {
+// GetEventHistory lists every event a competitor has attended. It carries the
+// same roster gate as GetByID: the history is the one response that names every
+// other event a person has competed at, so leaving it open would hand back the
+// attendance record of someone the caller is not allowed to look up at all.
+func (s *CompetitorService) GetEventHistory(competitorID string, adminView bool) ([]CompetitorEventWithEvent, error) {
+	if !adminView {
+		visible, err := s.onRoster(competitorID, s.currentEventID())
+		if err != nil {
+			return nil, err
+		}
+		if !visible {
+			return nil, ErrNotFound
+		}
+	}
+
 	var entries []db.CompetitorEvent
 	if err := s.db.Where("competitor_id = ?", competitorID).Find(&entries).Error; err != nil {
 		return nil, err

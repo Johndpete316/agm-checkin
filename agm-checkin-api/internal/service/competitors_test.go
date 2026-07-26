@@ -230,7 +230,7 @@ func TestMostRecentEventPrefersDatedEvents(t *testing.T) {
 	register(t, database, c.ID, "zzz-legacy")
 	register(t, database, c.ID, "nat-2026")
 
-	got, err := svc.GetByID(c.ID)
+	got, err := svc.GetByID(c.ID, true)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
