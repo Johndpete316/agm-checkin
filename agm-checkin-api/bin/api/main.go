@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"gorm.io/gorm"
 
 	"johndpete316/agm-checkin-api/internal/db"
 	authmw "johndpete316/agm-checkin-api/internal/middleware"
@@ -41,10 +42,6 @@ func main() {
 		log.Println("INFO: trusted-proxy mode is 'cloudflare'. Ensure the server is" +
 			" exclusively reachable via Cloudflare Tunnel; direct access bypasses IP security.")
 	}
-	ipResolver := func(r *http.Request) string {
-		return authmw.GetClientIPWithMode(r, trustedProxy)
-	}
-
 	database := db.Connect(dsn)
 	db.AutoMigrate(database)
 
@@ -52,8 +49,49 @@ func main() {
 		log.Fatalf("migrations failed: %v", err)
 	}
 
+	allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
+	if allowedOrigin == "" {
+		log.Fatal("no allowed origin set, please set an allowed origin with ALLOWED_ORIGIN environment variable.")
+	}
+
+	r := newRouter(routerConfig{
+		database:      database,
+		pin:           pin,
+		trustedProxy:  trustedProxy,
+		allowedOrigin: allowedOrigin,
+	})
+
+	// The listen port is configurable so the service can be run alongside other
+	// instances (local development, QA, sidecars) without editing the binary.
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	log.Printf("Listening on :%s", port)
+	log.Fatal(http.ListenAndServe(":"+port, r))
+}
+
+// routerConfig carries everything newRouter needs. It exists so the full route
+// table — including the auth and IP-blocklist middleware chains — can be built
+// and exercised from tests without starting a listener.
+type routerConfig struct {
+	database      *gorm.DB
+	pin           string
+	trustedProxy  authmw.TrustedProxy
+	allowedOrigin string
+}
+
+// newRouter builds the complete API router. main() and the tests must both go
+// through here so that a route added in one is never missing from the other.
+func newRouter(cfg routerConfig) *chi.Mux {
+	database := cfg.database
+
+	ipResolver := func(r *http.Request) string {
+		return authmw.GetClientIPWithMode(r, cfg.trustedProxy)
+	}
+
 	competitorSvc := service.NewCompetitorService(database)
-	authSvc := service.NewAuthService(database, pin)
+	authSvc := service.NewAuthService(database, cfg.pin)
 	staffSvc := service.NewStaffService(database)
 	eventSvc := service.NewEventService(database)
 	auditSvc := service.NewAuditService(database)
@@ -62,12 +100,8 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
 
-	allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
-	if allowedOrigin == "" {
-		log.Fatal("no allowed origin set, please set an allowed origin with ALLOWED_ORIGIN environment variable.")
-	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{allowedOrigin},
+		AllowedOrigins: []string{cfg.allowedOrigin},
 		AllowedMethods: []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Content-Type", "Accept", "Authorization"},
 		MaxAge:         300,
@@ -86,7 +120,7 @@ func main() {
 		// the trustedProxy value shows whether IP spoofing is possible.
 		respondJSON(w, http.StatusOK, map[string]string{
 			"status":       "ok",
-			"trustedProxy": string(trustedProxy),
+			"trustedProxy": string(cfg.trustedProxy),
 		})
 	})
 	r.Post("/api/auth/token", createToken(authSvc))
@@ -139,8 +173,7 @@ func main() {
 		})
 	})
 
-	log.Println("Listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	return r
 }
 
 func actorFrom(r *http.Request) (id, name string) {
