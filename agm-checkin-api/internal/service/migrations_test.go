@@ -1,7 +1,10 @@
 package service
 
 import (
+	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	"gorm.io/driver/postgres"
@@ -11,10 +14,17 @@ import (
 	"johndpete316/agm-checkin-api/internal/db"
 )
 
-// newEmptyDatabase returns a connection to a database whose public schema has
-// been dropped and recreated, i.e. the state a brand-new deployment starts from.
-// newFixture cannot stand in for this: it truncates but never drops, so after the
-// first run every table already exists and the fresh-install path goes untested.
+// newEmptyDatabase returns a connection to a brand-new, genuinely empty database
+// — the state a first install starts from. newFixture cannot stand in for it:
+// newFixture truncates but never drops, so after the first run every table
+// already exists and the fresh-install path goes untested.
+//
+// It provisions a sibling database rather than resetting the public schema of
+// TEST_DATABASE_URL. Dropping that schema would be visible to every other
+// database-backed package, and `go test ./...` runs packages in parallel, so a
+// reset here would pull the tables out from under a concurrently running suite
+// mid-migration. The sibling is dropped again on success and deliberately left
+// behind on failure so the wreckage can be inspected.
 func newEmptyDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -23,16 +33,56 @@ func newEmptyDatabase(t *testing.T) *gorm.DB {
 		t.Skip("TEST_DATABASE_URL not set; skipping database-backed tests")
 	}
 
-	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parsing TEST_DATABASE_URL: %v", err)
+	}
+	base := strings.TrimPrefix(parsed.Path, "/")
+	if base == "" {
+		t.Fatalf("TEST_DATABASE_URL has no database name: %s", parsed.Redacted())
+	}
+	// Test names are unique within a package, so this cannot collide with a
+	// sibling test, and lowercasing keeps it a valid unquoted identifier.
+	scratch := strings.ToLower(base + "_" + t.Name())
+
+	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		t.Fatalf("connecting to test database: %v", err)
 	}
-
-	if err := database.Exec(`DROP SCHEMA public CASCADE; CREATE SCHEMA public`).Error; err != nil {
-		t.Fatalf("resetting public schema: %v", err)
+	adminDB, err := admin.DB()
+	if err != nil {
+		t.Fatalf("getting sql handle: %v", err)
 	}
+
+	// A previous failed run may have left this behind.
+	admin.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %q", scratch))
+	if err := admin.Exec(fmt.Sprintf("CREATE DATABASE %q", scratch)).Error; err != nil {
+		t.Fatalf("creating scratch database %s: %v", scratch, err)
+	}
+
+	scratchURL := *parsed
+	scratchURL.Path = "/" + scratch
+	database, err := gorm.Open(postgres.Open(scratchURL.String()), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("connecting to scratch database %s: %v", scratch, err)
+	}
+
+	t.Cleanup(func() {
+		if sqlDB, err := database.DB(); err == nil {
+			sqlDB.Close()
+		}
+		if t.Failed() {
+			t.Logf("leaving scratch database %s in place for inspection", scratch)
+		} else if err := admin.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %q", scratch)).Error; err != nil {
+			t.Logf("dropping scratch database %s: %v", scratch, err)
+		}
+		adminDB.Close()
+	})
+
 	return database
 }
 
