@@ -14,27 +14,26 @@ import (
 
 // ImportRow represents one row from a normalized import CSV.
 type ImportRow struct {
-	NameFirst          string
-	NameLast           string
-	Studio             string
-	Teacher            string
-	Email              string
-	ShirtSize          string
-	DateOfBirth        *time.Time // nil if unknown
-	RequiresValidation bool
-	Validated          bool
-	Events             []string // event IDs sorted oldest→newest, e.g. ["nat-2024","glr-2026"]
+	NameFirst   string
+	NameLast    string
+	Studio      string
+	Teacher     string
+	Email       string
+	ShirtSize   string
+	DateOfBirth *time.Time // nil if unknown
+	Validated   bool
+	Events      []string // event IDs sorted oldest→newest, e.g. ["nat-2024","glr-2026"]
 }
 
 // ImportResult summarises what was inserted during a BulkImport call.
 type ImportResult struct {
-	CompetitorsCreated int            `json:"competitorsCreated"`
-	CompetitorsMatched int            `json:"competitorsMatched"`
-	FieldsUpdated      int            `json:"fieldsUpdated"`
-	EventsCreated      int            `json:"eventsCreated"`
-	EventEntriesAdded  int            `json:"eventEntriesAdded"`
+	CompetitorsCreated int             `json:"competitorsCreated"`
+	CompetitorsMatched int             `json:"competitorsMatched"`
+	FieldsUpdated      int             `json:"fieldsUpdated"`
+	EventsCreated      int             `json:"eventsCreated"`
+	EventEntriesAdded  int             `json:"eventEntriesAdded"`
 	FieldConflicts     []FieldConflict `json:"fieldConflicts,omitempty"`
-	Errors             []string       `json:"errors,omitempty"`
+	Errors             []string        `json:"errors,omitempty"`
 }
 
 // FieldConflict is returned when an import row has a value for a field that differs from the
@@ -43,45 +42,39 @@ type ImportResult struct {
 type FieldConflict struct {
 	CompetitorID  string `json:"competitorId"`
 	Name          string `json:"name"`
-	Field         string `json:"field"`         // JSON field name: "email", "studio", "teacher", "shirtSize", "dateOfBirth"
+	Field         string `json:"field"` // JSON field name: "email", "studio", "teacher", "shirtSize", "dateOfBirth"
 	ExistingValue string `json:"existingValue"`
 	ImportValue   string `json:"importValue"`
 }
 
-// eventChronology ranks every known event by start date, oldest first. Reading
-// this from the events table rather than a hardcoded list is the point: adding
-// an event is a data change, not a code change. Stub events imported without
-// dates carry the zero time and therefore rank oldest, so a dated event always
-// wins — which is what we want, since only the two current events have real
-// dates on file.
-func (s *CompetitorService) eventChronology() (map[string]int, error) {
-	var events []db.Event
-	if err := s.db.Order("start_date ASC, id ASC").Find(&events).Error; err != nil {
-		return nil, fmt.Errorf("loading event chronology: %w", err)
-	}
-	rank := make(map[string]int, len(events))
-	for i, e := range events {
-		rank[e.ID] = i
-	}
-	return rank, nil
-}
+// backupRetention is how many import snapshots to keep. Snapshots exist to undo
+// the import that just ran, so older ones are dead weight — before this was
+// enforced they accumulated indefinitely.
+const backupRetention = 3
 
-// mostRecentEvent returns the latest of the given event IDs. Events absent from
-// rank are unknown to the database and ignored.
-func mostRecentEvent(events []string, rank map[string]int) string {
-	best := ""
-	bestRank := 0
-	for _, e := range events {
-		r, known := rank[e]
-		if !known {
-			continue
-		}
-		if best == "" || r > bestRank {
-			bestRank = r
-			best = e
+// pruneBackups drops all but the newest keep snapshot pairs. Table names are
+// built from the integer suffixes returned by the catalog query, never from
+// caller input.
+func (s *CompetitorService) pruneBackups(keep int) error {
+	var suffixes []int64
+	if err := s.db.Raw(`
+		SELECT DISTINCT (substring(table_name from '_backup_(\d+)$'))::bigint AS suffix
+		FROM information_schema.tables
+		WHERE table_schema = 'public'
+		  AND table_name ~ '^competitors_backup_\d+$'
+		ORDER BY suffix DESC
+		OFFSET ?
+	`, keep).Scan(&suffixes).Error; err != nil {
+		return fmt.Errorf("listing backup tables: %w", err)
+	}
+	for _, suffix := range suffixes {
+		if err := s.db.Exec(fmt.Sprintf(
+			"DROP TABLE IF EXISTS competitors_backup_%d, competitor_events_backup_%d", suffix, suffix,
+		)).Error; err != nil {
+			return fmt.Errorf("dropping backup snapshot %d: %w", suffix, err)
 		}
 	}
-	return best
+	return nil
 }
 
 // nameKey returns a normalised lookup key for a competitor name.
@@ -106,6 +99,11 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 	`, ts, ts)
 	if err := s.db.Exec(backupSQL).Error; err != nil {
 		return nil, fmt.Errorf("creating backup tables: %w", err)
+	}
+	if err := s.pruneBackups(backupRetention); err != nil {
+		// The import itself succeeded in taking its snapshot; failing to tidy up
+		// older ones is not a reason to refuse the import.
+		result.Errors = append(result.Errors, fmt.Sprintf("pruning old backup tables: %v", err))
 	}
 
 	// --- 2. Load all existing competitors and build a name → []Competitor lookup map. ---
@@ -141,12 +139,6 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 			}
 			result.EventsCreated++
 		}
-	}
-
-	// Loaded after stub creation so freshly created events are ranked too.
-	eventRank, err := s.eventChronology()
-	if err != nil {
-		return nil, err
 	}
 
 	// --- 4. Classify each row: match existing competitor or create new. ---
@@ -213,12 +205,6 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 				autoFill["shirt_size"] = row.ShirtSize
 			}
 
-			// Update lastRegisteredEvent when incoming events include something newer.
-			if incoming := mostRecentEvent(row.Events, eventRank); incoming != "" &&
-				eventRank[incoming] > eventRank[existing.LastRegisteredEvent] {
-				autoFill["last_registered_event"] = incoming
-			}
-
 			// Date of birth: zero→fill auto; both set and differ→conflict.
 			if row.DateOfBirth != nil {
 				importDOB := row.DateOfBirth.UTC().Truncate(24 * time.Hour)
@@ -267,18 +253,15 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 		}
 
 		toCreate = append(toCreate, db.Competitor{
-			NameFirst:           strings.TrimSpace(row.NameFirst),
-			NameLast:            strings.TrimSpace(row.NameLast),
-			Studio:              row.Studio,
-			Teacher:             row.Teacher,
-			Email:               row.Email,
-			ShirtSize:           row.ShirtSize,
-			DateOfBirth:         dob,
-			DobVerifiedAt:       verifiedAt,
-			DobVerifiedBy:       verifiedBy,
-			RequiresValidation:  row.RequiresValidation,
-			Validated:           row.Validated,
-			LastRegisteredEvent: mostRecentEvent(row.Events, eventRank),
+			NameFirst:     strings.TrimSpace(row.NameFirst),
+			NameLast:      strings.TrimSpace(row.NameLast),
+			Studio:        row.Studio,
+			Teacher:       row.Teacher,
+			Email:         row.Email,
+			ShirtSize:     row.ShirtSize,
+			DateOfBirth:   dob,
+			DobVerifiedAt: verifiedAt,
+			DobVerifiedBy: verifiedBy,
 		})
 		toCreateIdx = append(toCreateIdx, i)
 	}
@@ -508,7 +491,7 @@ func (s *CompetitorService) Create(competitor *db.Competitor, staffName string) 
 		if err := tx.Create(competitor).Error; err != nil {
 			return err
 		}
-		return registerForEvent(tx, competitor.ID, competitor.LastRegisteredEvent)
+		return registerForEvent(tx, competitor.ID, competitor.RegisterForEvent)
 	})
 }
 
@@ -551,37 +534,19 @@ func (s *CompetitorService) CheckIn(id string, staffName string) (*CompetitorWit
 		CheckedInBy:     staffName,
 	}
 
-	// Both writes in one transaction: a check-in recorded without its matching
-	// registration update is the drift this conversion exists to remove
-	// (DB_REVIEW finding 3).
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "competitor_id"}, {Name: "event_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"checked_in", "check_in_datetime", "checked_in_by"}),
-		}).Create(&ce).Error; err != nil {
-			return err
-		}
-
-		// Reload the stored row. On the conflict path BeforeCreate has already
-		// overwritten ce.ID with a freshly generated UUID that was never persisted,
-		// and GORM would otherwise use that stale primary key as a query condition.
-		ce.ID = ""
-		if err := tx.Where("competitor_id = ? AND event_id = ?", id, eventID).First(&ce).Error; err != nil {
-			return fmt.Errorf("reloading check-in record: %w", err)
-		}
-
-		// Nothing reads last_registered_event any more, but it is kept current so
-		// this phase can be rolled back without stranding anyone checked in during
-		// the window. Migration 004 drops the column.
-		if competitor.LastRegisteredEvent != eventID {
-			if err := tx.Model(&competitor).Update("last_registered_event", eventID).Error; err != nil {
-				return fmt.Errorf("updating last registered event: %w", err)
-			}
-			competitor.LastRegisteredEvent = eventID
-		}
-		return nil
-	}); err != nil {
+	if err := s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "competitor_id"}, {Name: "event_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"checked_in", "check_in_datetime", "checked_in_by"}),
+	}).Create(&ce).Error; err != nil {
 		return nil, err
+	}
+
+	// Reload the stored row. On the conflict path BeforeCreate has already
+	// overwritten ce.ID with a freshly generated UUID that was never persisted,
+	// and GORM would otherwise use that stale primary key as a query condition.
+	ce.ID = ""
+	if err := s.db.Where("competitor_id = ? AND event_id = ?", id, eventID).First(&ce).Error; err != nil {
+		return nil, fmt.Errorf("reloading check-in record: %w", err)
 	}
 
 	recentMap, err := s.mostRecentEvents([]string{id})
@@ -625,13 +590,11 @@ func (s *CompetitorService) Validate(id, staffName string) (*db.Competitor, erro
 	if err := s.db.Model(&competitor).Updates(map[string]any{
 		"dob_verified_at": now,
 		"dob_verified_by": staffName,
-		"validated":       true,
 	}).Error; err != nil {
 		return nil, err
 	}
 	competitor.DobVerifiedAt = &now
 	competitor.DobVerifiedBy = staffName
-	competitor.Validated = true
 	return &competitor, nil
 }
 
@@ -673,7 +636,7 @@ func (s *CompetitorService) Update(id string, input db.Competitor, staffName str
 		if err := tx.Save(&input).Error; err != nil {
 			return err
 		}
-		return registerForEvent(tx, input.ID, input.LastRegisteredEvent)
+		return registerForEvent(tx, input.ID, input.RegisterForEvent)
 	}); err != nil {
 		return nil, err
 	}
@@ -749,6 +712,4 @@ func applyDobVerification(input *db.Competitor, existing *db.Competitor, staffNa
 		input.DobVerifiedAt = &now
 		input.DobVerifiedBy = staffName
 	}
-	input.Validated = input.DobVerifiedAt != nil
-	input.RequiresValidation = input.DobVerifiedAt == nil
 }

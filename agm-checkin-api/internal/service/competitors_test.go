@@ -2,7 +2,9 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -62,9 +64,9 @@ func seedEventOn(t *testing.T, database *gorm.DB, id string, current bool, start
 	}
 }
 
-func seedCompetitor(t *testing.T, database *gorm.DB, first, last, lastEvent string) db.Competitor {
+func seedCompetitor(t *testing.T, database *gorm.DB, first, last string) db.Competitor {
 	t.Helper()
-	c := db.Competitor{NameFirst: first, NameLast: last, LastRegisteredEvent: lastEvent}
+	c := db.Competitor{NameFirst: first, NameLast: last}
 	if err := database.Create(&c).Error; err != nil {
 		t.Fatalf("seeding competitor %s %s: %v", first, last, err)
 	}
@@ -89,17 +91,14 @@ func names(list []CompetitorWithCheckIn) map[string]bool {
 }
 
 // Registration staff see the current event's roster; admins see everyone.
-// This contract must survive the switch to competitor_events as the source of
-// truth, so the fixture keeps last_registered_event and the roster row in
-// agreement — a regression in either implementation fails this test.
 func TestGetAllScopesRegistrationUsersToCurrentEvent(t *testing.T) {
 	database, svc := newFixture(t)
 
 	seedEvent(t, database, "glr-2026", false)
 	seedEvent(t, database, "nat-2026", true)
 
-	onRoster := seedCompetitor(t, database, "Ada", "Lovelace", "nat-2026")
-	pastOnly := seedCompetitor(t, database, "Grace", "Hopper", "glr-2026")
+	onRoster := seedCompetitor(t, database, "Ada", "Lovelace")
+	pastOnly := seedCompetitor(t, database, "Grace", "Hopper")
 	register(t, database, onRoster.ID, "nat-2026")
 	register(t, database, pastOnly.ID, "glr-2026")
 
@@ -122,19 +121,17 @@ func TestGetAllScopesRegistrationUsersToCurrentEvent(t *testing.T) {
 	}
 }
 
-// The reason for the whole conversion: last_registered_event is one string, so
-// it cannot say "registered for glr-2026 and nat-2026". Under the old filter a
+// The reason for the whole conversion: last_registered_event was one string, so
+// it could not say "registered for glr-2026 and nat-2026". Under the old filter a
 // returning competitor was invisible to registration staff until an import
 // rewrote that column, which is what made opening a new event manual work.
-func TestReturningCompetitorIsVisibleWithoutRewritingLastRegisteredEvent(t *testing.T) {
+func TestReturningCompetitorIsVisibleForEveryEventTheyAreOn(t *testing.T) {
 	database, svc := newFixture(t)
 
 	seedEventOn(t, database, "glr-2026", false, time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC))
 	seedEventOn(t, database, "nat-2026", true, time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC))
 
-	// Deliberately stale: they attended glr-2026 and are on the nat-2026 roster,
-	// but nothing has rewritten the denormalized column.
-	returning := seedCompetitor(t, database, "Ada", "Lovelace", "glr-2026")
+	returning := seedCompetitor(t, database, "Ada", "Lovelace")
 	register(t, database, returning.ID, "glr-2026")
 	register(t, database, returning.ID, "nat-2026")
 
@@ -150,16 +147,15 @@ func TestReturningCompetitorIsVisibleWithoutRewritingLastRegisteredEvent(t *test
 	}
 }
 
-// Derived from event start dates, not from the stored column and not from a
-// hardcoded list of event slugs.
-func TestMostRecentEventIgnoresStaleStoredValue(t *testing.T) {
+// Derived from event start dates, not from a hardcoded list of event slugs.
+func TestMostRecentEventPrefersDatedEvents(t *testing.T) {
 	database, svc := newFixture(t)
 
 	seedEventOn(t, database, "nat-2026", true, time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC))
 	// A stub imported without dates, exactly as BulkImport creates them.
 	seedEventOn(t, database, "zzz-legacy", false, time.Time{})
 
-	c := seedCompetitor(t, database, "Grace", "Hopper", "zzz-legacy")
+	c := seedCompetitor(t, database, "Grace", "Hopper")
 	register(t, database, c.ID, "zzz-legacy")
 	register(t, database, c.ID, "nat-2026")
 
@@ -178,7 +174,7 @@ func TestCreateRegistersForSelectedEvent(t *testing.T) {
 	database, svc := newFixture(t)
 	seedEvent(t, database, "nat-2026", true)
 
-	c := db.Competitor{NameFirst: "Ada", NameLast: "Lovelace", LastRegisteredEvent: "nat-2026"}
+	c := db.Competitor{NameFirst: "Ada", NameLast: "Lovelace", RegisterForEvent: "nat-2026"}
 	if err := svc.Create(&c, "Alice Admin"); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -191,7 +187,7 @@ func TestCreateRegistersForSelectedEvent(t *testing.T) {
 		t.Error("newly created competitor is not visible to registration staff")
 	}
 
-	orphan := db.Competitor{NameFirst: "Grace", NameLast: "Hopper", LastRegisteredEvent: "no-such-event"}
+	orphan := db.Competitor{NameFirst: "Grace", NameLast: "Hopper", RegisterForEvent: "no-such-event"}
 	if err := svc.Create(&orphan, "Alice Admin"); !errors.Is(err, ErrUnknownEvent) {
 		t.Errorf("expected ErrUnknownEvent, got %v", err)
 	}
@@ -206,7 +202,7 @@ func TestCheckInIsIdempotent(t *testing.T) {
 	database, svc := newFixture(t)
 
 	seedEvent(t, database, "nat-2026", true)
-	c := seedCompetitor(t, database, "Ada", "Lovelace", "nat-2026")
+	c := seedCompetitor(t, database, "Ada", "Lovelace")
 	register(t, database, c.ID, "nat-2026")
 
 	first, err := svc.CheckIn(c.ID, "Staff Member")
@@ -243,7 +239,7 @@ func TestCheckInWithoutCurrentEvent(t *testing.T) {
 	database, svc := newFixture(t)
 
 	seedEvent(t, database, "nat-2026", false)
-	c := seedCompetitor(t, database, "Ada", "Lovelace", "nat-2026")
+	c := seedCompetitor(t, database, "Ada", "Lovelace")
 
 	if _, err := svc.CheckIn(c.ID, "Staff Member"); !errors.Is(err, ErrNoCurrentEvent) {
 		t.Errorf("expected ErrNoCurrentEvent, got %v", err)
@@ -256,7 +252,7 @@ func TestCheckInWithoutCurrentEvent(t *testing.T) {
 func TestValidateIsIdempotentAndRecordsProvenance(t *testing.T) {
 	database, svc := newFixture(t)
 
-	c := seedCompetitor(t, database, "Ada", "Lovelace", "")
+	c := seedCompetitor(t, database, "Ada", "Lovelace")
 
 	first, err := svc.Validate(c.ID, "Alice Admin")
 	if err != nil {
@@ -268,10 +264,6 @@ func TestValidateIsIdempotentAndRecordsProvenance(t *testing.T) {
 	if first.DobVerifiedBy != "Alice Admin" {
 		t.Errorf("expected verifier Alice Admin, got %q", first.DobVerifiedBy)
 	}
-	if !first.Validated {
-		t.Error("legacy validated flag should still be written during the window")
-	}
-
 	second, err := svc.Validate(c.ID, "Bob Staff")
 	if err != nil {
 		t.Fatalf("re-Validate: %v", err)
@@ -288,7 +280,7 @@ func TestValidateIsIdempotentAndRecordsProvenance(t *testing.T) {
 func TestUpdateDoesNotLetClientsForgeVerificationProvenance(t *testing.T) {
 	database, svc := newFixture(t)
 
-	c := seedCompetitor(t, database, "Grace", "Hopper", "")
+	c := seedCompetitor(t, database, "Grace", "Hopper")
 
 	forged := time.Date(1999, 1, 1, 0, 0, 0, 0, time.UTC)
 	got, err := svc.Update(c.ID, db.Competitor{
@@ -314,9 +306,6 @@ func TestUpdateDoesNotLetClientsForgeVerificationProvenance(t *testing.T) {
 	if cleared.DobVerifiedAt != nil {
 		t.Error("expected admin to be able to revoke verification")
 	}
-	if cleared.Validated {
-		t.Error("legacy validated flag should follow dobVerifiedAt")
-	}
 }
 
 // Migration 001 adds the foreign key that makes this true. Before it, deleting a
@@ -325,7 +314,7 @@ func TestDeleteCascadesToAttendance(t *testing.T) {
 	database, svc := newFixture(t)
 
 	seedEvent(t, database, "nat-2026", true)
-	c := seedCompetitor(t, database, "Ada", "Lovelace", "nat-2026")
+	c := seedCompetitor(t, database, "Ada", "Lovelace")
 	register(t, database, c.ID, "nat-2026")
 
 	if err := svc.Delete(c.ID); err != nil {
@@ -339,12 +328,77 @@ func TestDeleteCascadesToAttendance(t *testing.T) {
 	}
 }
 
+// Migration 003 drops these, but AutoMigrate runs first and happily re-creates a
+// column for any struct field that comes back — and it would not re-run the
+// migration to undo that. This test is the guard against a legacy field being
+// reintroduced by accident.
+func TestLegacyColumnsAreGone(t *testing.T) {
+	database, _ := newFixture(t)
+
+	for _, column := range []string{
+		"requires_validation", "validated", "last_registered_event",
+		"is_checked_in", "check_in_date_time", "checked_in_by",
+	} {
+		var found int64
+		if err := database.Raw(`
+			SELECT count(*) FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = 'competitors' AND column_name = ?
+		`, column).Scan(&found).Error; err != nil {
+			t.Fatalf("inspecting columns: %v", err)
+		}
+		if found != 0 {
+			t.Errorf("competitors.%s should have been dropped", column)
+		}
+	}
+}
+
+func TestPruneBackupsKeepsTheNewestSnapshots(t *testing.T) {
+	database, svc := newFixture(t)
+
+	var suffixes []int64
+	for i := int64(1); i <= 5; i++ {
+		suffixes = append(suffixes, i)
+		if err := database.Exec(fmt.Sprintf(`
+			CREATE TABLE competitors_backup_%d AS SELECT * FROM competitors;
+			CREATE TABLE competitor_events_backup_%d AS SELECT * FROM competitor_events;
+		`, i, i)).Error; err != nil {
+			t.Fatalf("creating snapshot %d: %v", i, err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, s := range suffixes {
+			database.Exec(fmt.Sprintf(
+				"DROP TABLE IF EXISTS competitors_backup_%d, competitor_events_backup_%d", s, s))
+		}
+	})
+
+	if err := svc.pruneBackups(2); err != nil {
+		t.Fatalf("pruneBackups: %v", err)
+	}
+
+	var remaining []string
+	if err := database.Raw(`
+		SELECT table_name FROM information_schema.tables
+		WHERE table_schema = 'public' AND table_name ~ '_backup_\d+$'
+		ORDER BY table_name
+	`).Scan(&remaining).Error; err != nil {
+		t.Fatalf("listing backups: %v", err)
+	}
+	want := []string{
+		"competitor_events_backup_4", "competitor_events_backup_5",
+		"competitors_backup_4", "competitors_backup_5",
+	}
+	if !slices.Equal(remaining, want) {
+		t.Errorf("expected the two newest snapshot pairs %v, got %v", want, remaining)
+	}
+}
+
 // An event with registrations must not be deletable.
 func TestEventDeleteIsRestrictedByAttendance(t *testing.T) {
 	database, _ := newFixture(t)
 
 	seedEvent(t, database, "nat-2026", true)
-	c := seedCompetitor(t, database, "Ada", "Lovelace", "nat-2026")
+	c := seedCompetitor(t, database, "Ada", "Lovelace")
 	register(t, database, c.ID, "nat-2026")
 
 	if err := database.Delete(&db.Event{}, "id = ?", "nat-2026").Error; err == nil {

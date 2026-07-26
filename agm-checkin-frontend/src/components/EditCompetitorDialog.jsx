@@ -59,7 +59,9 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
       studio: competitor.studio ?? '',
       teacher: competitor.teacher ?? '',
       shirtSize: competitor.shirtSize ?? '',
-      lastRegisteredEvent: competitor.lastRegisteredEvent ?? '',
+      // An action, not a stored value: picking an event adds them to that
+      // roster. Pre-filling it would silently re-register them on every save.
+      registerForEvent: '',
       dobVerified: !!competitor.dobVerifiedAt,
       note: competitor.note ?? '',
     })
@@ -87,7 +89,7 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
         studio: form.studio,
         teacher: form.teacher,
         shirtSize: form.shirtSize,
-        lastRegisteredEvent: form.lastRegisteredEvent,
+        registerForEvent: form.registerForEvent,
         // The server owns when and by whom; this only says whether.
         dobVerifiedAt: form.dobVerified ? (competitor.dobVerifiedAt ?? new Date().toISOString()) : null,
         note: form.note,
@@ -168,13 +170,13 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
               </Select>
             </FormControl>
             <FormControl fullWidth>
-              <InputLabel>Register For Event</InputLabel>
+              <InputLabel>Add To Event</InputLabel>
               <Select
-                value={form.lastRegisteredEvent ?? ''}
-                label="Register For Event"
-                onChange={e => set('lastRegisteredEvent', e.target.value)}
+                value={form.registerForEvent ?? ''}
+                label="Add To Event"
+                onChange={e => set('registerForEvent', e.target.value)}
               >
-                <MenuItem value=""><em>None</em></MenuItem>
+                <MenuItem value=""><em>No change</em></MenuItem>
                 {events.map(e => (
                   <MenuItem key={e.id} value={e.id}>{e.name} ({e.id})</MenuItem>
                 ))}

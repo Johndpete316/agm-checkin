@@ -10,16 +10,15 @@ import (
 )
 
 type Competitor struct {
-	ID                  string    `gorm:"primaryKey;type:uuid" json:"id"`
-	NameFirst           string    `json:"nameFirst"`
-	NameLast            string    `gorm:"index" json:"nameLast"`
-	DateOfBirth         time.Time `json:"dateOfBirth"`
-	ShirtSize           string    `json:"shirtSize"`
-	Email               string    `json:"email"`
-	Teacher             string    `json:"teacher"`
-	Studio              string    `json:"studio"`
-	LastRegisteredEvent string    `gorm:"index" json:"lastRegisteredEvent"`
-	Note                string    `json:"note"`
+	ID          string    `gorm:"primaryKey;type:uuid" json:"id"`
+	NameFirst   string    `json:"nameFirst"`
+	NameLast    string    `gorm:"index" json:"nameLast"`
+	DateOfBirth time.Time `json:"dateOfBirth"`
+	ShirtSize   string    `json:"shirtSize"`
+	Email       string    `json:"email"`
+	Teacher     string    `json:"teacher"`
+	Studio      string    `json:"studio"`
+	Note        string    `json:"note"`
 
 	// DobVerifiedAt is the single source of truth for identity verification:
 	// nil means the date of birth has not been confirmed against ID yet.
@@ -27,10 +26,10 @@ type Competitor struct {
 	DobVerifiedAt *time.Time `json:"dobVerifiedAt"`
 	DobVerifiedBy string     `gorm:"not null;default:''" json:"dobVerifiedBy"`
 
-	// Superseded by DobVerifiedAt. Still written so this phase stays revertible;
-	// migration 004 drops them.
-	RequiresValidation bool `json:"requiresValidation"`
-	Validated          bool `json:"validated"`
+	// RegisterForEvent is request-only: it tells Create and Update which event's
+	// roster to add this competitor to. Attendance lives in competitor_events,
+	// so there is no column behind it.
+	RegisterForEvent string `gorm:"-" json:"registerForEvent,omitempty"`
 }
 
 // Event represents a competition event (e.g. "glr-2026").

@@ -112,7 +112,8 @@ func parseImportCSV(r io.Reader) ([]service.ImportRow, []string) {
 			}
 		}
 
-		requiresValidation, _ := strconv.ParseBool(col(row, "requires_validation"))
+		// requires_validation is accepted in the CSV but ignored: it was always the
+		// exact inverse of validated, and dob_verified_at now carries that state.
 		validated, _ := strconv.ParseBool(col(row, "validated"))
 
 		var events []string
@@ -125,16 +126,15 @@ func parseImportCSV(r io.Reader) ([]service.ImportRow, []string) {
 		}
 
 		rows = append(rows, service.ImportRow{
-			NameFirst:          first,
-			NameLast:           last,
-			Studio:             col(row, "studio"),
-			Teacher:            col(row, "teacher"),
-			Email:              col(row, "email"),
-			ShirtSize:          col(row, "shirt_size"),
-			DateOfBirth:        dob,
-			RequiresValidation: requiresValidation,
-			Validated:          validated,
-			Events:             events,
+			NameFirst:   first,
+			NameLast:    last,
+			Studio:      col(row, "studio"),
+			Teacher:     col(row, "teacher"),
+			Email:       col(row, "email"),
+			ShirtSize:   col(row, "shirt_size"),
+			DateOfBirth: dob,
+			Validated:   validated,
+			Events:      events,
 		})
 	}
 

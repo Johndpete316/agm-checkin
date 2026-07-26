@@ -29,9 +29,9 @@ func TestCopyRosterCarriesForwardOnlyMissingCompetitors(t *testing.T) {
 	seedEvent(t, database, "nat-2026", true)
 	seedEvent(t, database, "nat-2027", false)
 
-	returning := seedCompetitor(t, database, "Ada", "Lovelace", "nat-2026")
-	alsoReturning := seedCompetitor(t, database, "Grace", "Hopper", "nat-2026")
-	already := seedCompetitor(t, database, "Alan", "Turing", "nat-2026")
+	returning := seedCompetitor(t, database, "Ada", "Lovelace")
+	alsoReturning := seedCompetitor(t, database, "Grace", "Hopper")
+	already := seedCompetitor(t, database, "Alan", "Turing")
 
 	for _, c := range []db.Competitor{returning, alsoReturning, already} {
 		register(t, database, c.ID, "nat-2026")
@@ -67,7 +67,7 @@ func TestCopyRosterIsIdempotentAndPreservesCheckIns(t *testing.T) {
 	seedEvent(t, database, "nat-2026", false)
 	seedEvent(t, database, "nat-2027", true)
 
-	c := seedCompetitor(t, database, "Ada", "Lovelace", "nat-2026")
+	c := seedCompetitor(t, database, "Ada", "Lovelace")
 	register(t, database, c.ID, "nat-2026")
 
 	if _, err := events.CopyRoster("nat-2027", "nat-2026", false); err != nil {
@@ -102,7 +102,7 @@ func TestCopyRosterDryRunPredictsWithoutWriting(t *testing.T) {
 	seedEvent(t, database, "nat-2027", false)
 
 	for _, name := range []string{"Ada", "Grace"} {
-		c := seedCompetitor(t, database, name, "Tester", "nat-2026")
+		c := seedCompetitor(t, database, name, "Tester")
 		register(t, database, c.ID, "nat-2026")
 	}
 

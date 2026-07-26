@@ -62,7 +62,7 @@ func createCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 			EntityType: "competitor",
 			EntityID:   competitor.ID,
 			EntityName: competitor.NameFirst + " " + competitor.NameLast,
-			Detail:     map[string]any{"studio": competitor.Studio, "lastRegisteredEvent": competitor.LastRegisteredEvent},
+			Detail:     map[string]any{"studio": competitor.Studio, "registeredFor": competitor.RegisterForEvent},
 			IP:         authmw.ClientIP(r),
 		})
 		respondJSON(w, http.StatusCreated, competitor)
@@ -205,9 +205,9 @@ func updateCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 			EntityID:   id,
 			EntityName: competitor.NameFirst + " " + competitor.NameLast,
 			Detail: map[string]any{
-				"studio":              competitor.Studio,
-				"teacher":             competitor.Teacher,
-				"lastRegisteredEvent": competitor.LastRegisteredEvent,
+				"studio":        competitor.Studio,
+				"teacher":       competitor.Teacher,
+				"registeredFor": competitor.RegisterForEvent,
 			},
 			IP: authmw.ClientIP(r),
 		})

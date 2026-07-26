@@ -26,7 +26,7 @@ const empty = {
   studio: '',
   teacher: '',
   shirtSize: '',
-  lastRegisteredEvent: '',
+  registerForEvent: '',
   dobVerified: false,
 }
 
@@ -35,14 +35,14 @@ export default function AddCompetitorDialog({ open, onClose, onCreated }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Pre-populate lastRegisteredEvent with the current event on open.
+  // Pre-populate the roster selection with the current event on open.
   useEffect(() => {
     if (!open) return
     setForm(empty)
     setError('')
     getCurrentEvent()
       .then(event => {
-        if (event?.id) setForm(prev => ({ ...prev, lastRegisteredEvent: event.id }))
+        if (event?.id) setForm(prev => ({ ...prev, registerForEvent: event.id }))
       })
       .catch(() => {})
   }, [open])
@@ -67,7 +67,7 @@ export default function AddCompetitorDialog({ open, onClose, onCreated }) {
         studio: form.studio.trim(),
         teacher: form.teacher.trim(),
         shirtSize: form.shirtSize,
-        lastRegisteredEvent: form.lastRegisteredEvent,
+        registerForEvent: form.registerForEvent,
         // The server owns when and by whom; this only says whether.
         dobVerifiedAt: form.dobVerified ? new Date().toISOString() : null,
       }
@@ -149,8 +149,8 @@ export default function AddCompetitorDialog({ open, onClose, onCreated }) {
             </FormControl>
             <TextField
               label="Register For Event"
-              value={form.lastRegisteredEvent}
-              onChange={e => set('lastRegisteredEvent', e.target.value)}
+              value={form.registerForEvent}
+              onChange={e => set('registerForEvent', e.target.value)}
               fullWidth
               helperText="Adds them to this event's roster. Auto-filled from current event."
             />
