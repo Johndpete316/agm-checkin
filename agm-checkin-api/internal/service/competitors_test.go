@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,53 @@ import (
 
 	"johndpete316/agm-checkin-api/internal/db"
 )
+
+// testDBLockKey serialises the Postgres-backed test packages. This package and
+// bin/api share one scratch database and both truncate it on every fixture, so
+// they must not interleave when `go test ./...` runs packages in parallel.
+const testDBLockKey = 8724532
+
+func TestMain(m *testing.M) {
+	os.Exit(runWithDatabaseLock(m.Run))
+}
+
+// runWithDatabaseLock holds a session-level advisory lock on the scratch
+// database for the whole package run.
+func runWithDatabaseLock(run func() int) int {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		return run()
+	}
+	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "acquiring test database lock: %v\n", err)
+		return 1
+	}
+	sqlDB, err := database.DB()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "acquiring test database lock: %v\n", err)
+		return 1
+	}
+	defer sqlDB.Close()
+
+	ctx := context.Background()
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "acquiring test database lock: %v\n", err)
+		return 1
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", testDBLockKey); err != nil {
+		fmt.Fprintf(os.Stderr, "acquiring test database lock: %v\n", err)
+		return 1
+	}
+	defer conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", testDBLockKey)
+
+	return run()
+}
 
 // newFixture returns a clean database and service. It runs AutoMigrate followed
 // by the ordered migrations, so every test run also exercises the migration
