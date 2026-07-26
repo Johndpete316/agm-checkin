@@ -37,15 +37,31 @@ ALTER TABLE competitor_schedules ALTER COLUMN competitor_id TYPE uuid USING comp
 -- missing row rather than dropping the claim. Once competitor_events becomes the
 -- single source of truth these competitors would otherwise vanish from the
 -- registration view.
-INSERT INTO competitor_events (id, competitor_id, event_id, checked_in)
-SELECT gen_random_uuid(), c.id, c.last_registered_event, false
-FROM competitors c
-WHERE COALESCE(c.last_registered_event, '') <> ''
-  AND EXISTS (SELECT 1 FROM events e WHERE e.id = c.last_registered_event)
-  AND NOT EXISTS (
-        SELECT 1 FROM competitor_events ce
-        WHERE ce.competitor_id = c.id
-          AND ce.event_id = c.last_registered_event);
+--
+-- Guarded on the column existing: the second starting state this migration has
+-- to support is a freshly AutoMigrated database, where the current Go model has
+-- already omitted last_registered_event, so the column is never created and an
+-- unguarded reference is a parse-time failure rather than a no-op. There is
+-- nothing to backfill in that state -- a fresh database has no legacy claims.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'competitors'
+          AND column_name  = 'last_registered_event')
+    THEN
+        INSERT INTO competitor_events (id, competitor_id, event_id, checked_in)
+        SELECT gen_random_uuid(), c.id, c.last_registered_event, false
+        FROM competitors c
+        WHERE COALESCE(c.last_registered_event, '') <> ''
+          AND EXISTS (SELECT 1 FROM events e WHERE e.id = c.last_registered_event)
+          AND NOT EXISTS (
+                SELECT 1 FROM competitor_events ce
+                WHERE ce.competitor_id = c.id
+                  AND ce.event_id = c.last_registered_event);
+    END IF;
+END $$;
 
 -- CASCADE on the competitor side: deleting a competitor should take their
 -- attendance history with it. RESTRICT on the event side: an event with
