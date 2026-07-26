@@ -123,7 +123,6 @@ func main() {
 
 			r.Post("/api/events", createEvent(eventSvc, auditSvc))
 			r.Patch("/api/events/{id}/current", setCurrentEvent(eventSvc, auditSvc))
-			r.Post("/api/events/{id}/roster/copy-from/{sourceId}", copyEventRoster(eventSvc, auditSvc))
 
 			r.Get("/api/staff", listStaff(staffSvc))
 			r.Patch("/api/staff/{id}/role", updateStaffRole(staffSvc, auditSvc))

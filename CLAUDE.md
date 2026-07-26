@@ -96,7 +96,6 @@ Endpoints marked **Admin** additionally require `RequireAdmin` middleware (role 
 | GET | `/api/events/current` | Required | Get the current event |
 | POST | `/api/events` | Admin | Create a new event |
 | PATCH | `/api/events/{id}/current` | Admin | Set the current event (clears all others) |
-| POST | `/api/events/{id}/roster/copy-from/{sourceId}` | Admin | Carry forward `{sourceId}`'s roster onto `{id}`; skips competitors already there and never marks anyone checked in. `?dryRun=true` returns the counts without writing |
 | GET | `/api/staff` | Admin | List all staff tokens |
 | PATCH | `/api/staff/{id}/role` | Admin | Update a staff member's role (`{"role": "admin"}` or `{"role": "registration"}`) |
 | DELETE | `/api/staff/{id}` | Admin | Revoke a staff token |

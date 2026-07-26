@@ -44,20 +44,6 @@ export async function createEvent(data) {
   return res.json()
 }
 
-// Adds everyone on sourceId's roster to targetId. Pass dryRun to preview the
-// counts without writing anything.
-export async function copyRoster(targetId, sourceId, { dryRun = false } = {}) {
-  const res = await apiFetch(
-    `${BASE_URL}/api/events/${targetId}/roster/copy-from/${sourceId}?dryRun=${dryRun}`,
-    { method: 'POST' },
-  )
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.error || 'Failed to copy roster')
-  }
-  return res.json()
-}
-
 export async function setCurrentEvent(id) {
   const res = await apiFetch(`${BASE_URL}/api/events/${id}/current`, {
     method: 'PATCH',

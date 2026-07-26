@@ -68,46 +68,6 @@ func createEvent(svc *service.EventService, audit *service.AuditService) http.Ha
 	}
 }
 
-func copyEventRoster(svc *service.EventService, audit *service.AuditService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		targetID := chi.URLParam(r, "id")
-		sourceID := chi.URLParam(r, "sourceId")
-		dryRun := r.URL.Query().Get("dryRun") == "true"
-
-		result, err := svc.CopyRoster(targetID, sourceID, dryRun)
-		if err != nil {
-			switch {
-			case errors.Is(err, service.ErrEventNotFound):
-				respondJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
-			case errors.Is(err, service.ErrSameEvent):
-				respondJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot copy an event's roster onto itself"})
-			default:
-				respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			}
-			return
-		}
-
-		if !dryRun {
-			actorID, actorName := actorFrom(r)
-			audit.Log(service.LogEntry{
-				ActorID:    actorID,
-				ActorName:  actorName,
-				Action:     "event.roster_copied",
-				EntityType: "event",
-				EntityID:   targetID,
-				EntityName: targetID,
-				Detail: map[string]any{
-					"from":            sourceID,
-					"copied":          result.Copied,
-					"alreadyOnTarget": result.AlreadyOnTarget,
-				},
-				IP: authmw.ClientIP(r),
-			})
-		}
-		respondJSON(w, http.StatusOK, result)
-	}
-}
-
 func setCurrentEvent(svc *service.EventService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
