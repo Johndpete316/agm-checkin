@@ -82,16 +82,28 @@ func nameKey(first, last string) string {
 	return strings.ToLower(strings.TrimSpace(first)) + "|" + strings.ToLower(strings.TrimSpace(last))
 }
 
+// importBatchSize caps how many rows go into a single INSERT. Postgres' extended
+// query protocol allows at most 65535 bind parameters per statement, and GORM
+// sends a slice Create as one statement, so an unbatched import of a few
+// thousand competitors fails mid-flight on parameter count alone.
+const importBatchSize = 1000
+
 // BulkImport creates Postgres snapshot backup tables, then processes all rows from the CSV.
 // Rows whose (first_name, last_name) match an existing competitor are merged rather than
 // duplicated: a missing DOB is filled in automatically, a conflicting DOB is returned in
 // DOBConflicts for the caller to resolve via the UI. Rows with no existing match create new
 // competitor records. Stub event records are auto-created for any event ID not yet in the DB.
+//
+// Everything after the snapshot runs in one transaction: an import that creates
+// competitors but fails before writing their attendance rows would hand staff a
+// roster that is missing people, which is worse than an import that did nothing.
 func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) {
 	result := &ImportResult{}
 	importedAt := time.Now()
 
 	// --- 1. Backup existing tables so the import can be rolled back if needed. ---
+	// Deliberately outside the transaction: the snapshot is the operator's escape
+	// hatch and must survive whatever the import does.
 	ts := importedAt.Unix()
 	backupSQL := fmt.Sprintf(`
 		CREATE TABLE competitors_backup_%d AS SELECT * FROM competitors;
@@ -106,10 +118,23 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 		result.Errors = append(result.Errors, fmt.Sprintf("pruning old backup tables: %v", err))
 	}
 
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		return s.importRows(tx, rows, importedAt, result)
+	}); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// importRows performs every write of an import against tx. Any error it returns
+// rolls the whole import back, so failures that used to be collected into
+// result.Errors and worked around are now fatal: once a statement errors inside a
+// Postgres transaction every later statement in it fails anyway.
+func (s *CompetitorService) importRows(tx *gorm.DB, rows []ImportRow, importedAt time.Time, result *ImportResult) error {
 	// --- 2. Load all existing competitors and build a name → []Competitor lookup map. ---
 	var allExisting []db.Competitor
-	if err := s.db.Find(&allExisting).Error; err != nil {
-		return nil, fmt.Errorf("loading existing competitors: %w", err)
+	if err := tx.Find(&allExisting).Error; err != nil {
+		return fmt.Errorf("loading existing competitors: %w", err)
 	}
 	existingByName := make(map[string][]db.Competitor, len(allExisting))
 	for _, c := range allExisting {
@@ -126,16 +151,17 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 	}
 	for eid := range eventSet {
 		var existing db.Event
-		if err := s.db.First(&existing, "id = ?", eid).Error; err != nil {
+		if err := tx.First(&existing, "id = ?", eid).Error; err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, fmt.Errorf("checking event %s: %w", eid, err)
+				return fmt.Errorf("checking event %s: %w", eid, err)
 			}
 			// Event doesn't exist — create a stub. Dates are left as zero; admin fills them in later.
 			name := eventDisplayName(eid)
 			stub := db.Event{ID: eid, Name: name}
-			if err := s.db.Create(&stub).Error; err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("create event %s: %v", eid, err))
-				continue
+			if err := tx.Create(&stub).Error; err != nil {
+				// Attendance rows below reference this event, so carrying on
+				// would only trade this error for a foreign key violation.
+				return fmt.Errorf("creating event %s: %w", eid, err)
 			}
 			result.EventsCreated++
 		}
@@ -225,13 +251,10 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 			}
 
 			if len(autoFill) > 0 {
-				if err := s.db.Model(&existing).Updates(autoFill).Error; err != nil {
-					result.Errors = append(result.Errors, fmt.Sprintf(
-						"%s: failed to auto-fill fields: %v", fullName, err,
-					))
-				} else {
-					result.FieldsUpdated += len(autoFill)
+				if err := tx.Model(&existing).Updates(autoFill).Error; err != nil {
+					return fmt.Errorf("auto-filling fields for %s: %w", fullName, err)
 				}
+				result.FieldsUpdated += len(autoFill)
 			}
 			continue
 		}
@@ -268,8 +291,8 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 
 	// --- 5. Bulk-insert new competitors. ---
 	if len(toCreate) > 0 {
-		if err := s.db.Create(&toCreate).Error; err != nil {
-			return nil, fmt.Errorf("bulk inserting competitors: %w", err)
+		if err := tx.CreateInBatches(&toCreate, importBatchSize).Error; err != nil {
+			return fmt.Errorf("bulk inserting competitors: %w", err)
 		}
 		result.CompetitorsCreated = len(toCreate)
 		// Back-fill resolvedIDs for newly created records.
@@ -298,14 +321,15 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 
 	if len(ces) > 0 {
 		// ON CONFLICT DO NOTHING — safe to re-run if partially completed.
-		ceResult := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&ces)
+		ceResult := tx.Clauses(clause.OnConflict{DoNothing: true}).
+			CreateInBatches(&ces, importBatchSize)
 		if ceResult.Error != nil {
-			return nil, fmt.Errorf("bulk inserting competitor events: %w", ceResult.Error)
+			return fmt.Errorf("bulk inserting competitor events: %w", ceResult.Error)
 		}
 		result.EventEntriesAdded = int(ceResult.RowsAffected)
 	}
 
-	return result, nil
+	return nil
 }
 
 // eventDisplayName converts an event slug into a human-readable name for stub events.

@@ -68,6 +68,13 @@ func parseImportCSV(r io.Reader) ([]service.ImportRow, []string) {
 		return nil, []string{"could not read CSV header: " + err.Error()}
 	}
 
+	// Excel writes a UTF-8 BOM at the start of every CSV it saves, which sticks to
+	// the first header cell and stops "first_name" from matching. Every row then
+	// looks nameless and is skipped, so the whole file imports as a clean zero.
+	if len(headers) > 0 {
+		headers[0] = strings.TrimPrefix(headers[0], "\ufeff")
+	}
+
 	cols := map[string]int{}
 	for i, h := range headers {
 		cols[strings.TrimSpace(strings.ToLower(h))] = i
