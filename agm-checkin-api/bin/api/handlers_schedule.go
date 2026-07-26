@@ -88,28 +88,46 @@ func createScheduleEntry(scheduleSvc *service.ScheduleService, audit *service.Au
 func updateScheduleEntry(scheduleSvc *service.ScheduleService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
+		// Pointers, so an absent key is distinguishable from an explicit zero
+		// value. A PATCH that names only "room" must leave the other columns
+		// alone; decoding into plain fields cannot tell those two cases apart
+		// and turns every request into a full replace.
 		var body struct {
-			Instrument   string    `json:"instrument"`
-			ScheduleDate time.Time `json:"scheduleDate"`
-			ScheduleTime string    `json:"scheduleTime"`
-			Room         string    `json:"room"`
-			Category     string    `json:"category"`
-			Division     string    `json:"division"`
-			SortOrder    int       `json:"sortOrder"`
+			Instrument   *string    `json:"instrument"`
+			ScheduleDate *time.Time `json:"scheduleDate"`
+			ScheduleTime *string    `json:"scheduleTime"`
+			Room         *string    `json:"room"`
+			Category     *string    `json:"category"`
+			Division     *string    `json:"division"`
+			SortOrder    *int       `json:"sortOrder"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
-		updated, err := scheduleSvc.Update(id, db.CompetitorSchedule{
-			Instrument:   body.Instrument,
-			ScheduleDate: body.ScheduleDate,
-			ScheduleTime: body.ScheduleTime,
-			Room:         body.Room,
-			Category:     body.Category,
-			Division:     body.Division,
-			SortOrder:    body.SortOrder,
-		})
+		updates := map[string]any{}
+		if body.Instrument != nil {
+			updates["instrument"] = *body.Instrument
+		}
+		if body.ScheduleDate != nil {
+			updates["schedule_date"] = *body.ScheduleDate
+		}
+		if body.ScheduleTime != nil {
+			updates["schedule_time"] = *body.ScheduleTime
+		}
+		if body.Room != nil {
+			updates["room"] = *body.Room
+		}
+		if body.Category != nil {
+			updates["category"] = *body.Category
+		}
+		if body.Division != nil {
+			updates["division"] = *body.Division
+		}
+		if body.SortOrder != nil {
+			updates["sort_order"] = *body.SortOrder
+		}
+		updated, err := scheduleSvc.Update(id, updates)
 		if err != nil {
 			if errors.Is(err, service.ErrScheduleNotFound) {
 				respondJSON(w, http.StatusNotFound, map[string]string{"error": "schedule entry not found"})
