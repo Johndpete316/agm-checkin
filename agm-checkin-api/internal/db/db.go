@@ -11,8 +11,8 @@ import (
 
 type Competitor struct {
 	ID          string    `gorm:"primaryKey;type:uuid" json:"id"`
-	NameFirst   string    `json:"nameFirst"`
-	NameLast    string    `gorm:"index" json:"nameLast"`
+	NameFirst   string    `gorm:"not null" json:"nameFirst"`
+	NameLast    string    `gorm:"not null;index" json:"nameLast"`
 	DateOfBirth time.Time `json:"dateOfBirth"`
 	ShirtSize   string    `json:"shirtSize"`
 	Email       string    `json:"email"`
