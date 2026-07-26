@@ -52,29 +52,65 @@ func main() {
 		log.Fatalf("migrations failed: %v", err)
 	}
 
-	competitorSvc := service.NewCompetitorService(database)
-	authSvc := service.NewAuthService(database, pin)
-	staffSvc := service.NewStaffService(database)
-	eventSvc := service.NewEventService(database)
-	auditSvc := service.NewAuditService(database)
-	scheduleSvc := service.NewScheduleService(database)
-
-	r := chi.NewRouter()
-	r.Use(chimw.Logger)
-
 	allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
 	if allowedOrigin == "" {
 		log.Fatal("no allowed origin set, please set an allowed origin with ALLOWED_ORIGIN environment variable.")
 	}
+
+	r := newRouter(apiDeps{
+		competitors:   service.NewCompetitorService(database),
+		auth:          service.NewAuthService(database, pin),
+		staff:         service.NewStaffService(database),
+		events:        service.NewEventService(database),
+		audit:         service.NewAuditService(database),
+		schedule:      service.NewScheduleService(database),
+		allowedOrigin: allowedOrigin,
+		ipResolver:    ipResolver,
+		trustedProxy:  trustedProxy,
+	})
+
+	log.Println("Listening on :8080")
+	log.Fatal(http.ListenAndServe(":8080", r))
+}
+
+// apiDeps carries everything newRouter needs. Grouping them keeps the route
+// table testable: tests build the exact same router as production instead of
+// re-declaring routes that can drift.
+type apiDeps struct {
+	competitors   *service.CompetitorService
+	auth          *service.AuthService
+	staff         *service.StaffService
+	events        *service.EventService
+	audit         *service.AuditService
+	schedule      *service.ScheduleService
+	allowedOrigin string
+	ipResolver    authmw.IPResolver
+	trustedProxy  authmw.TrustedProxy
+}
+
+// newRouter builds the complete HTTP route table. This is the single source of
+// truth for which endpoints exist and what middleware guards them.
+func newRouter(deps apiDeps) *chi.Mux {
+	competitorSvc := deps.competitors
+	authSvc := deps.auth
+	staffSvc := deps.staff
+	eventSvc := deps.events
+	auditSvc := deps.audit
+	scheduleSvc := deps.schedule
+	trustedProxy := deps.trustedProxy
+
+	r := chi.NewRouter()
+	r.Use(chimw.Logger)
+
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{allowedOrigin},
+		AllowedOrigins: []string{deps.allowedOrigin},
 		AllowedMethods: []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Content-Type", "Accept", "Authorization"},
 		MaxAge:         300,
 	}))
 	r.Use(chimw.Recoverer)
 
-	r.Use(authmw.WithIPResolver(ipResolver))
+	r.Use(authmw.WithIPResolver(deps.ipResolver))
 
 	r.Use(authmw.IPBlocklist(authSvc))
 
@@ -89,7 +125,7 @@ func main() {
 			"trustedProxy": string(trustedProxy),
 		})
 	})
-	r.Post("/api/auth/token", createToken(authSvc))
+	r.Post("/api/auth/token", createToken(authSvc, auditSvc))
 
 	r.Group(func(r chi.Router) {
 		r.Use(authmw.RequireToken(authSvc))
@@ -139,8 +175,7 @@ func main() {
 		})
 	})
 
-	log.Println("Listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	return r
 }
 
 func actorFrom(r *http.Request) (id, name string) {

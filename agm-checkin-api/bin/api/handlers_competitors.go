@@ -219,15 +219,20 @@ func updateCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 func deleteCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		existing, _ := svc.GetByID(id)
+		// Resolve the competitor before deleting: the name has to be captured while
+		// the row still exists, and an unknown id must not be reported as a
+		// successful delete. Logging a competitor.deleted entry for a row that was
+		// never there puts a deletion that did not happen into the audit trail.
+		existing, err := svc.GetByID(id)
+		if err != nil || existing == nil {
+			respondJSON(w, http.StatusNotFound, map[string]string{"error": "competitor not found"})
+			return
+		}
 		if err := svc.Delete(id); err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		entityName := id
-		if existing != nil {
-			entityName = existing.NameFirst + " " + existing.NameLast
-		}
+		entityName := existing.NameFirst + " " + existing.NameLast
 		actorID, actorName := actorFrom(r)
 		audit.Log(service.LogEntry{
 			ActorID:    actorID,

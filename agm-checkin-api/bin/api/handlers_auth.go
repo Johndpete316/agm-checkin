@@ -13,7 +13,7 @@ import (
 	"johndpete316/agm-checkin-api/internal/service"
 )
 
-func createToken(authSvc *service.AuthService) http.HandlerFunc {
+func createToken(authSvc *service.AuthService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Code      string `json:"code"`
@@ -44,6 +44,23 @@ func createToken(authSvc *service.AuthService) http.HandlerFunc {
 			}
 			return
 		}
+
+		// A successful login mints a new, non-expiring bearer token — a fresh
+		// credential with API access. Without this entry the audit log can show a
+		// token being revoked or promoted but never where it came from, so an
+		// unrecognised name in the staff list has no provenance at all. The actor
+		// is the new token itself: nobody else authorised its creation.
+		actorName := token.FirstName + " " + token.LastName
+		audit.Log(service.LogEntry{
+			ActorID:    token.ID,
+			ActorName:  actorName,
+			Action:     "staff.token_issued",
+			EntityType: "staff_token",
+			EntityID:   token.ID,
+			EntityName: actorName,
+			Detail:     map[string]any{"role": token.Role},
+			IP:         ip,
+		})
 
 		respondJSON(w, http.StatusCreated, map[string]string{
 			"token":     token.Token,
