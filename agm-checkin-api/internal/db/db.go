@@ -14,14 +14,23 @@ type Competitor struct {
 	NameFirst           string    `json:"nameFirst"`
 	NameLast            string    `gorm:"index" json:"nameLast"`
 	DateOfBirth         time.Time `json:"dateOfBirth"`
-	RequiresValidation  bool      `json:"requiresValidation"`
-	Validated           bool      `json:"validated"`
 	ShirtSize           string    `json:"shirtSize"`
 	Email               string    `json:"email"`
 	Teacher             string    `json:"teacher"`
 	Studio              string    `json:"studio"`
 	LastRegisteredEvent string    `gorm:"index" json:"lastRegisteredEvent"`
 	Note                string    `json:"note"`
+
+	// DobVerifiedAt is the single source of truth for identity verification:
+	// nil means the date of birth has not been confirmed against ID yet.
+	// Verification is permanent, so this is never cleared by the check-in flow.
+	DobVerifiedAt *time.Time `json:"dobVerifiedAt"`
+	DobVerifiedBy string     `gorm:"not null;default:''" json:"dobVerifiedBy"`
+
+	// Superseded by DobVerifiedAt. Still written so this phase stays revertible;
+	// migration 004 drops them.
+	RequiresValidation bool `json:"requiresValidation"`
+	Validated          bool `json:"validated"`
 }
 
 // Event represents a competition event (e.g. "glr-2026").

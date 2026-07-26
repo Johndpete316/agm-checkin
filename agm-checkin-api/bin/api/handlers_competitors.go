@@ -46,11 +46,11 @@ func createCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
-		if err := svc.Create(&competitor); err != nil {
+		actorID, actorName := actorFrom(r)
+		if err := svc.Create(&competitor, actorName); err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		actorID, actorName := actorFrom(r)
 		audit.Log(service.LogEntry{
 			ActorID:    actorID,
 			ActorName:  actorName,
@@ -156,19 +156,12 @@ func updateCompetitorContact(svc *service.CompetitorService, audit *service.Audi
 func validateCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		competitor, err := svc.Validate(id)
+		actorID, actorName := actorFrom(r)
+		competitor, err := svc.Validate(id, actorName)
 		if err != nil {
-			switch {
-			case errors.Is(err, service.ErrValidationNotRequired):
-				respondJSON(w, http.StatusConflict, map[string]string{
-					"error": "competitor does not require identity validation",
-				})
-			default:
-				respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			}
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		actorID, actorName := actorFrom(r)
 		audit.Log(service.LogEntry{
 			ActorID:    actorID,
 			ActorName:  actorName,
@@ -190,12 +183,12 @@ func updateCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
-		competitor, err := svc.Update(id, input)
+		actorID, actorName := actorFrom(r)
+		competitor, err := svc.Update(id, input, actorName)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		actorID, actorName := actorFrom(r)
 		audit.Log(service.LogEntry{
 			ActorID:    actorID,
 			ActorName:  actorName,

@@ -27,7 +27,7 @@ const empty = {
   teacher: '',
   shirtSize: '',
   lastRegisteredEvent: '',
-  requiresValidation: false,
+  dobVerified: false,
 }
 
 export default function AddCompetitorDialog({ open, onClose, onCreated }) {
@@ -68,8 +68,8 @@ export default function AddCompetitorDialog({ open, onClose, onCreated }) {
         teacher: form.teacher.trim(),
         shirtSize: form.shirtSize,
         lastRegisteredEvent: form.lastRegisteredEvent,
-        requiresValidation: form.requiresValidation,
-        validated: !form.requiresValidation,
+        // The server owns when and by whom; this only says whether.
+        dobVerifiedAt: form.dobVerified ? new Date().toISOString() : null,
       }
       const created = await createCompetitor(payload)
       onCreated(created)
@@ -159,11 +159,11 @@ export default function AddCompetitorDialog({ open, onClose, onCreated }) {
           <FormControlLabel
             control={
               <Switch
-                checked={form.requiresValidation}
-                onChange={e => set('requiresValidation', e.target.checked)}
+                checked={form.dobVerified}
+                onChange={e => set('dobVerified', e.target.checked)}
               />
             }
-            label="Requires age/identity validation"
+            label="Date of birth verified against ID"
           />
 
           {error && <Alert severity="error">{error}</Alert>}

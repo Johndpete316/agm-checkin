@@ -106,7 +106,7 @@ export default function StatsPage() {
   const checkedIn = current.filter(c => c.currentCheckIn?.checkedIn).length
   const remaining = total - checkedIn
   const pct = total > 0 ? Math.round((checkedIn / total) * 100) : 0
-  const validationPending = current.filter(c => c.requiresValidation && !c.validated && !c.currentCheckIn?.checkedIn).length
+  const validationPending = current.filter(c => !c.dobVerifiedAt && !c.currentCheckIn?.checkedIn).length
 
   const pieData = [
     { name: 'Checked In', value: checkedIn },

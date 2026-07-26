@@ -118,22 +118,22 @@ func main() {
 		seen[key] = true
 
 		dob := randomDOB(rng)
-		age := 2026 - dob.Year()
 
-		// Competitors under 18 require age/identity validation
-		requiresValidation := age < 18
+		// Most competitors had their ID checked at a previous event; the rest
+		// still need verifying at the desk.
+		verified := rng.Float32() < 0.7
 
-		// If validation isn't required the competitor is considered validated.
-		// If it is required, randomly mark some as already validated to simulate
-		// staff having processed them ahead of time.
-		validated := !requiresValidation
-		if requiresValidation {
-			validated = rng.Float32() < 0.5
+		// Some of the unverified have no DOB on file at all.
+		if !verified && rng.Float32() < 0.35 {
+			dob = time.Time{}
 		}
 
-		// Some minors have DOB missing — leave as zero time to represent unknown
-		if requiresValidation && rng.Float32() < 0.35 {
-			dob = time.Time{}
+		var verifiedAt *time.Time
+		verifiedBy := ""
+		if verified {
+			when := time.Now().AddDate(0, -(rng.Intn(18) + 1), 0)
+			verifiedAt = &when
+			verifiedBy = "historical import"
 		}
 
 		email := fmt.Sprintf("%s.%s@example.com",
@@ -145,8 +145,10 @@ func main() {
 			NameFirst:           first,
 			NameLast:            last,
 			DateOfBirth:         dob,
-			RequiresValidation:  requiresValidation,
-			Validated:           validated,
+			DobVerifiedAt:       verifiedAt,
+			DobVerifiedBy:       verifiedBy,
+			RequiresValidation:  !verified,
+			Validated:           verified,
 			ShirtSize:           shirtSizes[rng.Intn(len(shirtSizes))],
 			Email:               email,
 			Teacher:             teachers[rng.Intn(len(teachers))],

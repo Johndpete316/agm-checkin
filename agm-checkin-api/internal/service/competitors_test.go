@@ -162,24 +162,72 @@ func TestCheckInWithoutCurrentEvent(t *testing.T) {
 	}
 }
 
-func TestValidateOnlyAppliesWhenRequired(t *testing.T) {
+// Verification is permanent and records who did it. Re-verifying must not
+// re-stamp the original provenance, or the audit trail silently reattributes
+// the check to whoever touched the record last.
+func TestValidateIsIdempotentAndRecordsProvenance(t *testing.T) {
 	database, svc := newFixture(t)
 
-	needsCheck := db.Competitor{NameFirst: "Ada", NameLast: "Lovelace", RequiresValidation: true}
-	if err := database.Create(&needsCheck).Error; err != nil {
-		t.Fatalf("seeding: %v", err)
-	}
-	got, err := svc.Validate(needsCheck.ID)
+	c := seedCompetitor(t, database, "Ada", "Lovelace", "")
+
+	first, err := svc.Validate(c.ID, "Alice Admin")
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if !got.Validated {
-		t.Error("expected competitor to be marked validated")
+	if first.DobVerifiedAt == nil {
+		t.Fatal("expected dobVerifiedAt to be set")
+	}
+	if first.DobVerifiedBy != "Alice Admin" {
+		t.Errorf("expected verifier Alice Admin, got %q", first.DobVerifiedBy)
+	}
+	if !first.Validated {
+		t.Error("legacy validated flag should still be written during the window")
 	}
 
-	noCheck := seedCompetitor(t, database, "Grace", "Hopper", "")
-	if _, err := svc.Validate(noCheck.ID); !errors.Is(err, ErrValidationNotRequired) {
-		t.Errorf("expected ErrValidationNotRequired, got %v", err)
+	second, err := svc.Validate(c.ID, "Bob Staff")
+	if err != nil {
+		t.Fatalf("re-Validate: %v", err)
+	}
+	if !second.DobVerifiedAt.Equal(*first.DobVerifiedAt) {
+		t.Errorf("timestamp was re-stamped: %v then %v", first.DobVerifiedAt, second.DobVerifiedAt)
+	}
+	if second.DobVerifiedBy != "Alice Admin" {
+		t.Errorf("verifier was overwritten, got %q", second.DobVerifiedBy)
+	}
+}
+
+// The client may say whether a competitor is verified, never when or by whom.
+func TestUpdateDoesNotLetClientsForgeVerificationProvenance(t *testing.T) {
+	database, svc := newFixture(t)
+
+	c := seedCompetitor(t, database, "Grace", "Hopper", "")
+
+	forged := time.Date(1999, 1, 1, 0, 0, 0, 0, time.UTC)
+	got, err := svc.Update(c.ID, db.Competitor{
+		NameFirst:     "Grace",
+		NameLast:      "Hopper",
+		DobVerifiedAt: &forged,
+		DobVerifiedBy: "Somebody Else",
+	}, "Alice Admin")
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got.DobVerifiedAt.Equal(forged) {
+		t.Error("client-supplied verification timestamp was persisted")
+	}
+	if got.DobVerifiedBy != "Alice Admin" {
+		t.Errorf("expected verifier Alice Admin, got %q", got.DobVerifiedBy)
+	}
+
+	cleared, err := svc.Update(c.ID, db.Competitor{NameFirst: "Grace", NameLast: "Hopper"}, "Alice Admin")
+	if err != nil {
+		t.Fatalf("clearing Update: %v", err)
+	}
+	if cleared.DobVerifiedAt != nil {
+		t.Error("expected admin to be able to revoke verification")
+	}
+	if cleared.Validated {
+		t.Error("legacy validated flag should follow dobVerifiedAt")
 	}
 }
 

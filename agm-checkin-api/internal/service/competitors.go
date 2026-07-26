@@ -90,9 +90,10 @@ func nameKey(first, last string) string {
 // competitor records. Stub event records are auto-created for any event ID not yet in the DB.
 func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) {
 	result := &ImportResult{}
+	importedAt := time.Now()
 
 	// --- 1. Backup existing tables so the import can be rolled back if needed. ---
-	ts := time.Now().Unix()
+	ts := importedAt.Unix()
 	backupSQL := fmt.Sprintf(`
 		CREATE TABLE competitors_backup_%d AS SELECT * FROM competitors;
 		CREATE TABLE competitor_events_backup_%d AS SELECT * FROM competitor_events;
@@ -242,6 +243,17 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 		if row.DateOfBirth != nil {
 			dob = *row.DateOfBirth
 		}
+
+		// A CSV can assert a competitor was verified, but not that we hold the
+		// date it was verified against — without a DOB the claim is unusable, so
+		// they get checked at the desk instead.
+		var verifiedAt *time.Time
+		verifiedBy := ""
+		if row.Validated && !dob.IsZero() {
+			verifiedAt = &importedAt
+			verifiedBy = "historical import"
+		}
+
 		toCreate = append(toCreate, db.Competitor{
 			NameFirst:           strings.TrimSpace(row.NameFirst),
 			NameLast:            strings.TrimSpace(row.NameLast),
@@ -250,6 +262,8 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 			Email:               row.Email,
 			ShirtSize:           row.ShirtSize,
 			DateOfBirth:         dob,
+			DobVerifiedAt:       verifiedAt,
+			DobVerifiedBy:       verifiedBy,
 			RequiresValidation:  row.RequiresValidation,
 			Validated:           row.Validated,
 			LastRegisteredEvent: mostRecentEvent(row.Events),
@@ -425,7 +439,8 @@ func (s *CompetitorService) GetByID(id string) (*CompetitorWithCheckIn, error) {
 	return result, nil
 }
 
-func (s *CompetitorService) Create(competitor *db.Competitor) error {
+func (s *CompetitorService) Create(competitor *db.Competitor, staffName string) error {
+	applyDobVerification(competitor, nil, staffName)
 	return s.db.Create(competitor).Error
 }
 
@@ -488,20 +503,29 @@ func (s *CompetitorService) UpdateDOB(id string, dob time.Time) (*db.Competitor,
 	return &competitor, nil
 }
 
-func (s *CompetitorService) Validate(id string) (*db.Competitor, error) {
+// Validate records that staff confirmed this competitor's date of birth against
+// ID. It is idempotent: re-verifying an already-verified competitor keeps the
+// original timestamp and staff name rather than overwriting the provenance.
+func (s *CompetitorService) Validate(id, staffName string) (*db.Competitor, error) {
 	var competitor db.Competitor
 	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
-	// Finding 12: reject the call if the competitor does not require validation.
-	// This prevents any authenticated staff member from arbitrarily marking
-	// competitors as validated when no identity check was intended.
-	if !competitor.RequiresValidation {
-		return nil, ErrValidationNotRequired
+	if competitor.DobVerifiedAt != nil {
+		return &competitor, nil
 	}
-	if err := s.db.Model(&competitor).Update("validated", true).Error; err != nil {
+	// Postgres timestamptz holds microseconds; truncate so the value we return
+	// matches the value that was actually stored.
+	now := time.Now().Truncate(time.Microsecond)
+	if err := s.db.Model(&competitor).Updates(map[string]any{
+		"dob_verified_at": now,
+		"dob_verified_by": staffName,
+		"validated":       true,
+	}).Error; err != nil {
 		return nil, err
 	}
+	competitor.DobVerifiedAt = &now
+	competitor.DobVerifiedBy = staffName
 	competitor.Validated = true
 	return &competitor, nil
 }
@@ -533,12 +557,13 @@ func (s *CompetitorService) UpdateContact(id string, note *string, email *string
 	return &competitor, nil
 }
 
-func (s *CompetitorService) Update(id string, input db.Competitor) (*db.Competitor, error) {
+func (s *CompetitorService) Update(id string, input db.Competitor, staffName string) (*db.Competitor, error) {
 	var competitor db.Competitor
 	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
 	input.ID = competitor.ID
+	applyDobVerification(&input, &competitor, staffName)
 	if err := s.db.Save(&input).Error; err != nil {
 		return nil, err
 	}
@@ -588,9 +613,28 @@ func (s *CompetitorService) GetEventHistory(competitorID string) ([]CompetitorEv
 // ErrNotFound is returned when a competitor record does not exist.
 var ErrNotFound = errors.New("competitor not found")
 
-// ErrValidationNotRequired is returned when staff attempt to validate a
-// competitor whose requiresValidation flag is false.  Calling /validate on
-// a competitor who does not require identity verification is a no-op from a
-// safety perspective and most likely indicates a programming error or an
-// attempt to set the validated flag on arbitrary records (Finding 12).
-var ErrValidationNotRequired = errors.New("competitor does not require identity validation")
+// applyDobVerification resolves the verification state the client asked for
+// against what is already stored. The client only gets to say whether the
+// competitor is verified; when and by whom are always decided here, so a caller
+// cannot forge provenance. An existing verification is never re-stamped.
+func applyDobVerification(input *db.Competitor, existing *db.Competitor, staffName string) {
+	var stored *db.Competitor
+	if existing != nil {
+		stored = existing
+	}
+	switch {
+	case input.DobVerifiedAt == nil:
+		input.DobVerifiedBy = ""
+	case stored != nil && stored.DobVerifiedAt != nil:
+		input.DobVerifiedAt = stored.DobVerifiedAt
+		input.DobVerifiedBy = stored.DobVerifiedBy
+	default:
+		// Postgres timestamptz holds microseconds; truncate so the value we
+		// return matches the value that was actually stored.
+		now := time.Now().Truncate(time.Microsecond)
+		input.DobVerifiedAt = &now
+		input.DobVerifiedBy = staffName
+	}
+	input.Validated = input.DobVerifiedAt != nil
+	input.RequiresValidation = input.DobVerifiedAt == nil
+}
