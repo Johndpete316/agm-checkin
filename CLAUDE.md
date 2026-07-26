@@ -85,10 +85,10 @@ Endpoints marked **Admin** additionally require `RequireAdmin` middleware (role 
 | GET | `/api/competitors/{id}` | Required | Get single competitor with current-event check-in record |
 | POST | `/api/competitors` | Required | Create competitor |
 | PATCH | `/api/competitors/{id}` | Admin | Update all competitor fields (including `note`) |
-| PATCH | `/api/competitors/{id}/checkin` | Required | Mark checked in for current event; auto-updates `lastRegisteredEvent` |
+| PATCH | `/api/competitors/{id}/checkin` | Required | Mark checked in for current event (upserts the `competitor_events` row) |
 | PATCH | `/api/competitors/{id}/contact` | Required | Update `note` and/or `email` `{"note": "...", "email": "..."}` (both optional); available to all roles |
 | PATCH | `/api/competitors/{id}/dob` | Required | Update date of birth `{"dateOfBirth": "2005-03-15T00:00:00Z"}` |
-| PATCH | `/api/competitors/{id}/validate` | Required | Mark competitor as validated (`validated = true`) |
+| PATCH | `/api/competitors/{id}/validate` | Required | Record that the DOB was checked against ID (stamps `dobVerifiedAt` / `dobVerifiedBy`); idempotent |
 | DELETE | `/api/competitors/{id}` | Required | Delete competitor |
 | GET | `/api/competitors/{id}/events` | Required | Full event history for a competitor |
 | POST | `/api/competitors/import` | Admin | Bulk import from normalized CSV upload (multipart `file` field); creates DB snapshot before writing |
@@ -96,6 +96,7 @@ Endpoints marked **Admin** additionally require `RequireAdmin` middleware (role 
 | GET | `/api/events/current` | Required | Get the current event |
 | POST | `/api/events` | Admin | Create a new event |
 | PATCH | `/api/events/{id}/current` | Admin | Set the current event (clears all others) |
+| POST | `/api/events/{id}/roster/copy-from/{sourceId}` | Admin | Carry forward `{sourceId}`'s roster onto `{id}`; skips competitors already there and never marks anyone checked in. `?dryRun=true` returns the counts without writing |
 | GET | `/api/staff` | Admin | List all staff tokens |
 | PATCH | `/api/staff/{id}/role` | Admin | Update a staff member's role (`{"role": "admin"}` or `{"role": "registration"}`) |
 | DELETE | `/api/staff/{id}` | Admin | Revoke a staff token |
@@ -105,25 +106,26 @@ Endpoints marked **Admin** additionally require `RequireAdmin` middleware (role 
 
 ```go
 type Competitor struct {
-    ID                  string    // UUID, auto-generated
-    NameFirst           string
-    NameLast            string
-    DateOfBirth         time.Time
-    RequiresValidation  bool      // set true for competitors requiring identity check (typically minors)
-    Validated           bool      // set true once staff has verified identity
-    ShirtSize           string
-    Email               string
-    Teacher             string
-    Studio              string
-    LastRegisteredEvent string    // event ID slug of the most recent event this competitor registered for
-    Note                string    // free-form internal staff note; visible to all roles, editable by admins only via PATCH /api/competitors/{id}
+    ID               string    // UUID, auto-generated
+    NameFirst        string
+    NameLast         string
+    DateOfBirth      time.Time
+    ShirtSize        string
+    Email            string
+    Teacher          string
+    Studio           string
+    Note             string    // free-form internal staff note; visible to all roles, editable by admins only via PATCH /api/competitors/{id}
+    DobVerifiedAt    *time.Time // nil = DOB not yet checked against ID; verification is permanent
+    DobVerifiedBy    string     // staff name at time of verification; server-owned, never client-supplied
+    RegisterForEvent string     // request-only (gorm:"-"): tells Create/Update which roster to add them to
 }
 
 // Check-in state lives in CompetitorEvent, not on Competitor directly.
 // GetAll and GetByID return CompetitorWithCheckIn which embeds the current-event CE record.
 type CompetitorWithCheckIn struct {
     Competitor
-    CurrentCheckIn *CompetitorEvent // nil if not registered for current event
+    CurrentCheckIn  *CompetitorEvent // nil if not registered for current event
+    MostRecentEvent string           // derived from competitor_events on every read, never stored
 }
 
 type Event struct {
@@ -229,9 +231,9 @@ Note: This project uses Node.js via nvm with fish shell: `fish -c "nvm use 24 &&
 | `src/theme.js` | MUI theme (Montserrat font, primary `#1565C0`) |
 | `src/App.jsx` | `ColorModeContext`, `AuthProvider`, `ProtectedRoute`, `AdminRoute`, `AppLayout` |
 | `src/components/NavBar.jsx` | Responsive nav: hamburger + Drawer on mobile, full nav on desktop (`md` breakpoint); shows admin links when `isAdmin` |
-| `src/components/CompetitorCard.jsx` | Card used on Check-In page; shows age, studio, teacher, shirt size, email, lastRegisteredEvent; handles validation dialog; check-in state from `currentCheckIn` |
+| `src/components/CompetitorCard.jsx` | Card used on Check-In page; shows age, studio, teacher, shirt size, email, `mostRecentEvent`; handles validation dialog; check-in state from `currentCheckIn` |
 | `src/components/EditCompetitorDialog.jsx` | Admin-only dialog to edit all competitor fields |
-| `src/components/AddCompetitorDialog.jsx` | Admin-only dialog to add a new competitor; pre-populates `lastRegisteredEvent` from current event |
+| `src/components/AddCompetitorDialog.jsx` | Admin-only dialog to add a new competitor; pre-populates `registerForEvent` from current event |
 | `src/pages/LoginPage.jsx` | Two-step login: access code → name → token + role stored in localStorage |
 | `src/pages/CheckInPage.jsx` | `/home` — debounced server-side search + check-in |
 | `src/pages/CompetitorsPage.jsx` | `/competitors` — card list on mobile, sortable table on desktop; edit + add for admins |
@@ -260,7 +262,7 @@ Note: This project uses Node.js via nvm with fish shell: `fish -c "nvm use 24 &&
 
 ### Validation flow
 
-Competitors with `requiresValidation = true` and `validated = false` show a "Validate" chip.
+Competitors with `dobVerifiedAt === null` show a "Validate" chip. Verification is permanent — verify once, trust forever, regardless of age.
 Clicking "Check In" on these opens a dialog with an editable date-of-birth field (pre-populated from existing DOB).
 Staff corrects the DOB if needed, then confirms. This fires:
 1. `PATCH /dob` if the date changed

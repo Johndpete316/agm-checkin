@@ -51,13 +51,13 @@ const SHIRT_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
 // sort: null means the column is not sortable.
 const COLUMNS = [
   { key: 'name',        sort: 'nameLast',           label: 'Name' },
-  { key: 'event',       sort: 'lastRegisteredEvent', label: 'Event' },
+  { key: 'event',       sort: 'mostRecentEvent',     label: 'Event' },
   { key: 'studio',      sort: 'studio',              label: 'Studio' },
   { key: 'teacher',     sort: 'teacher',             label: 'Teacher' },
   { key: 'shirt',       sort: 'shirtSize',           label: 'Shirt' },
   { key: 'dob',         sort: 'dateOfBirth',         label: 'DOB / Age' },
   { key: 'email',       sort: 'email',               label: 'Email' },
-  { key: 'validated',   sort: 'validated',           label: 'Validated' },
+  { key: 'validated',   sort: 'dobVerifiedAt',       label: 'Validated' },
   { key: 'status',      sort: null,                  label: 'Status' },
   { key: 'checkinTime', sort: null,                  label: 'Check-In Time' },
   { key: 'note',        sort: 'note',               label: 'Note' },
@@ -198,7 +198,7 @@ export default function CompetitorsPage() {
 
   // Events present in the loaded competitor data, ordered by start_date from the API
   const availableEvents = useMemo(() => {
-    const found = new Set(competitors.map(c => c.lastRegisteredEvent).filter(Boolean))
+    const found = new Set(competitors.map(c => c.mostRecentEvent).filter(Boolean))
     return events.filter(e => found.has(e.id)).reverse()
   }, [competitors, events])
 
@@ -247,7 +247,7 @@ export default function CompetitorsPage() {
   const isCheckedIn = (competitor) => !!competitor.currentCheckIn?.checkedIn
 
   const handleCheckInClick = (competitor) => {
-    if (competitor.requiresValidation && !competitor.validated) {
+    if (!competitor.dobVerifiedAt) {
       setEditedDOB(toInputDate(competitor.dateOfBirth))
       setDialogError('')
       setValidateTarget(competitor)
@@ -303,13 +303,12 @@ export default function CompetitorsPage() {
         (c.shirtSize || '').toLowerCase().includes(q)
       )
     }
-    if (filterEvent)   list = list.filter(c => c.lastRegisteredEvent === filterEvent)
+    if (filterEvent)   list = list.filter(c => c.mostRecentEvent === filterEvent)
     if (filterStudio)  list = list.filter(c => c.studio === filterStudio)
     if (filterTeacher) list = list.filter(c => c.teacher === filterTeacher)
     if (filterShirt)   list = list.filter(c => c.shirtSize === filterShirt)
-    if (filterValidated === 'yes')   list = list.filter(c => c.validated)
-    if (filterValidated === 'needs') list = list.filter(c => c.requiresValidation && !c.validated)
-    if (filterValidated === 'na')    list = list.filter(c => !c.requiresValidation && !c.validated)
+    if (filterValidated === 'yes')   list = list.filter(c => !!c.dobVerifiedAt)
+    if (filterValidated === 'needs') list = list.filter(c => !c.dobVerifiedAt)
     if (filterStatus === 'checkedin') list = list.filter(c => !!c.currentCheckIn?.checkedIn)
     if (filterStatus === 'pending')   list = list.filter(c => !c.currentCheckIn?.checkedIn)
 
@@ -419,7 +418,6 @@ export default function CompetitorsPage() {
                 <MenuItem value=""><em>All</em></MenuItem>
                 <MenuItem value="yes">Validated</MenuItem>
                 <MenuItem value="needs">Needs Validation</MenuItem>
-                <MenuItem value="na">N/A</MenuItem>
               </Select>
             </FormControl>
 
@@ -478,9 +476,9 @@ export default function CompetitorsPage() {
                       <Typography variant="body2" color="text.secondary" noWrap>
                         {competitor.teacher || '—'}
                       </Typography>
-                      {competitor.lastRegisteredEvent && (
+                      {competitor.mostRecentEvent && (
                         <Typography variant="caption" color="text.secondary" noWrap display="block">
-                          {competitor.lastRegisteredEvent}
+                          {competitor.mostRecentEvent}
                         </Typography>
                       )}
                     </Box>
@@ -490,11 +488,11 @@ export default function CompetitorsPage() {
                         color={isCheckedIn(competitor) ? 'success' : 'default'}
                         size="small"
                       />
-                      {competitor.validated ? (
+                      {competitor.dobVerifiedAt ? (
                           <Chip icon={<CheckCircleOutlineIcon />} label="Validated" color="success" size="small" variant="outlined" />
-                        ) : competitor.requiresValidation ? (
+                        ) : (
                           <Chip icon={<WarningAmberIcon />} label="Validate" color="warning" size="small" variant="outlined" />
-                        ) : null
+                        )
                       }
                     </Box>
                   </Box>
@@ -504,7 +502,7 @@ export default function CompetitorsPage() {
                       <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Age</Typography>
                       <Typography variant="body1" fontWeight={700}>{age !== null ? `${age} yrs` : '—'}</Typography>
                     </Box>
-                    {(isAdmin || (competitor.requiresValidation && !competitor.validated)) && (
+                    {(isAdmin || !competitor.dobVerifiedAt) && (
                       <Box>
                         <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>Date of Birth</Typography>
                         <Typography variant="body1" fontWeight={700}>{dob || '—'}</Typography>
@@ -578,7 +576,7 @@ export default function CompetitorsPage() {
                       )}
                       {vis('event') && (
                         <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                          {competitor.lastRegisteredEvent || '—'}
+                          {competitor.mostRecentEvent || '—'}
                         </TableCell>
                       )}
                       {vis('studio') && (
@@ -592,7 +590,7 @@ export default function CompetitorsPage() {
                       )}
                       {vis('dob') && (
                         <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                          {(isAdmin || (competitor.requiresValidation && !competitor.validated))
+                          {(isAdmin || !competitor.dobVerifiedAt)
                             ? (dob ? `${dob}${age !== null ? ` · ${age} yrs` : ''}` : '—')
                             : (age !== null ? `${age} yrs` : '—')
                           }
@@ -603,16 +601,14 @@ export default function CompetitorsPage() {
                       )}
                       {vis('validated') && (
                         <TableCell>
-                          {competitor.validated ? (
-                            <Tooltip title="Validated">
+                          {competitor.dobVerifiedAt ? (
+                            <Tooltip title={`Verified by ${competitor.dobVerifiedBy || 'unknown'}`}>
                               <CheckCircleOutlineIcon fontSize="small" color="success" />
                             </Tooltip>
-                          ) : competitor.requiresValidation ? (
+                          ) : (
                             <Tooltip title="Requires validation">
                               <WarningAmberIcon fontSize="small" color="warning" />
                             </Tooltip>
-                          ) : (
-                            <Typography variant="body2" color="text.disabled">—</Typography>
                           )}
                         </TableCell>
                       )}

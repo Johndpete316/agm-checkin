@@ -59,9 +59,10 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
       studio: competitor.studio ?? '',
       teacher: competitor.teacher ?? '',
       shirtSize: competitor.shirtSize ?? '',
-      lastRegisteredEvent: competitor.lastRegisteredEvent ?? '',
-      requiresValidation: competitor.requiresValidation ?? false,
-      validated: competitor.validated ?? false,
+      // An action, not a stored value: picking an event adds them to that
+      // roster. Pre-filling it would silently re-register them on every save.
+      registerForEvent: '',
+      dobVerified: !!competitor.dobVerifiedAt,
       note: competitor.note ?? '',
     })
     setError('')
@@ -88,9 +89,9 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
         studio: form.studio,
         teacher: form.teacher,
         shirtSize: form.shirtSize,
-        lastRegisteredEvent: form.lastRegisteredEvent,
-        requiresValidation: form.requiresValidation,
-        validated: form.validated,
+        registerForEvent: form.registerForEvent,
+        // The server owns when and by whom; this only says whether.
+        dobVerifiedAt: form.dobVerified ? (competitor.dobVerifiedAt ?? new Date().toISOString()) : null,
         note: form.note,
       }
       const updated = await updateCompetitor(competitor.id, payload)
@@ -169,13 +170,13 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
               </Select>
             </FormControl>
             <FormControl fullWidth>
-              <InputLabel>Last Registered Event</InputLabel>
+              <InputLabel>Add To Event</InputLabel>
               <Select
-                value={form.lastRegisteredEvent ?? ''}
-                label="Last Registered Event"
-                onChange={e => set('lastRegisteredEvent', e.target.value)}
+                value={form.registerForEvent ?? ''}
+                label="Add To Event"
+                onChange={e => set('registerForEvent', e.target.value)}
               >
-                <MenuItem value=""><em>None</em></MenuItem>
+                <MenuItem value=""><em>No change</em></MenuItem>
                 {events.map(e => (
                   <MenuItem key={e.id} value={e.id}>{e.name} ({e.id})</MenuItem>
                 ))}
@@ -193,15 +194,16 @@ export default function EditCompetitorDialog({ competitor, onClose, onSaved }) {
             placeholder="Internal staff note (visible to all staff)"
           />
 
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
             <FormControlLabel
-              control={<Switch checked={form.requiresValidation ?? false} onChange={e => set('requiresValidation', e.target.checked)} />}
-              label="Requires Validation"
+              control={<Switch checked={form.dobVerified ?? false} onChange={e => set('dobVerified', e.target.checked)} />}
+              label="Date of Birth Verified"
             />
-            <FormControlLabel
-              control={<Switch checked={form.validated ?? false} onChange={e => set('validated', e.target.checked)} />}
-              label="Validated"
-            />
+            {competitor?.dobVerifiedAt && (
+              <Typography variant="caption" color="text.secondary">
+                {`by ${competitor.dobVerifiedBy || 'unknown'} on ${new Date(competitor.dobVerifiedAt).toLocaleDateString()}`}
+              </Typography>
+            )}
           </Box>
 
           {error && <Alert severity="error">{error}</Alert>}

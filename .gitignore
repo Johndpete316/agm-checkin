@@ -5,7 +5,10 @@ agm-checkin-frontend/node_modules/
 agm-checkin-frontend/dist/
 
 *.sql
+# Schema migrations are source, not dumps — they are embedded into the API image.
+!agm-checkin-api/internal/db/migrations/*.sql
 .claude
 
 agm_data_dump
 *.csv
+*.backup

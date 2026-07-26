@@ -183,7 +183,7 @@ export default function ImportPage() {
                   ['email', 'string', 'Student or parent email only — no teacher addresses'],
                   ['shirt_size', 'string', 'Adult XL / L / M / S or Youth XL / L / M / S'],
                   ['date_of_birth', 'YYYY-MM-DD or blank', 'Leave blank if unknown'],
-                  ['requires_validation', 'true / false', 'Whether ID check is needed at check-in'],
+                  ['requires_validation', 'true / false', 'Ignored — kept only so older CSVs still load'],
                   ['validated', 'true / false', 'Whether ID has already been verified in a prior event'],
                   ['events', 'pipe-separated IDs', 'e.g. nat-2024|glr-2025|glr-2026'],
                 ].map(([col, fmt, notes]) => (
@@ -228,10 +228,9 @@ Jane,Smith,Westside Dance,"Emshwiller, Michael",jane@example.com,Youth M,2012-04
             </Box>
             <Box component="li" sx={{ mt: 0.5 }}>
               <Typography variant="body2">
-                <strong>Not modified by import:</strong> requires_validation, validated, note,
-                last_registered_event, and any check-in records are never overwritten on an existing
-                record. Event registrations are added (missing rows only) but existing ones are
-                never removed.
+                <strong>Not modified by import:</strong> the verified-ID status, note, and any
+                check-in records are never overwritten on an existing record. Event registrations
+                are added (missing rows only) but existing ones are never removed.
               </Typography>
             </Box>
             <Box component="li" sx={{ mt: 0.5 }}>

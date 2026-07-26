@@ -97,16 +97,17 @@ export default function StatsPage() {
     fetchData()
   }, [fetchData])
 
-  // Only count competitors registered for the current event
+  // Registered for the current event means having an attendance row for it,
+  // which is exactly what the API returns as currentCheckIn.
   const current = currentEvent
-    ? competitors.filter(c => c.lastRegisteredEvent === currentEvent.id)
+    ? competitors.filter(c => c.currentCheckIn)
     : []
 
   const total = current.length
   const checkedIn = current.filter(c => c.currentCheckIn?.checkedIn).length
   const remaining = total - checkedIn
   const pct = total > 0 ? Math.round((checkedIn / total) * 100) : 0
-  const validationPending = current.filter(c => c.requiresValidation && !c.validated && !c.currentCheckIn?.checkedIn).length
+  const validationPending = current.filter(c => !c.dobVerifiedAt && !c.currentCheckIn?.checkedIn).length
 
   const pieData = [
     { name: 'Checked In', value: checkedIn },

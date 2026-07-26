@@ -92,7 +92,7 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
   const [editError, setEditError] = useState('')
 
   const isCheckedIn = !!competitor.currentCheckIn?.checkedIn
-  const needsValidation = competitor.requiresValidation && !competitor.validated
+  const needsValidation = !competitor.dobVerifiedAt
   const age = calculateAge(competitor.dateOfBirth)
   const dob = formatDOB(competitor.dateOfBirth)
   const fullName = `${competitor.nameFirst} ${competitor.nameLast}`
@@ -169,7 +169,7 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
                     variant="outlined"
                   />
                 )}
-                {competitor.validated && (
+                {competitor.dobVerifiedAt && (
                   <Chip
                     icon={<CheckCircleOutlineIcon fontSize="small" />}
                     label="Validated"
@@ -188,9 +188,9 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
                   />
                 )}
               </Box>
-              {competitor.lastRegisteredEvent && (
+              {competitor.mostRecentEvent && (
                 <Typography variant="caption" color="text.secondary">
-                  {competitor.lastRegisteredEvent}
+                  {competitor.mostRecentEvent}
                 </Typography>
               )}
             </Box>

@@ -26,16 +26,9 @@ func main() {
 		log.Fatal("AUTH_PIN environment variable is required")
 	}
 
-	// TRUSTED_PROXY controls which upstream headers are trusted for client-IP
-	// resolution.  "cloudflare" (default) trusts CF-Connecting-IP and
-	// X-Forwarded-For as set by Cloudflare Tunnel.  "direct" ignores all
-	// forwarding headers and uses only the TCP RemoteAddr, which is correct
-	// when the server is directly accessible (e.g. local development).
-	// See the security review (Finding 3) for details.
 	trustedProxy := authmw.TrustedProxy(os.Getenv("TRUSTED_PROXY"))
 	switch trustedProxy {
 	case authmw.TrustedProxyCloudflare, authmw.TrustedProxyDirect:
-		// valid
 	case "":
 		trustedProxy = authmw.TrustedProxyCloudflare
 		log.Println("WARNING: TRUSTED_PROXY not set; defaulting to 'cloudflare'." +
@@ -45,11 +38,6 @@ func main() {
 		log.Fatalf("invalid TRUSTED_PROXY value %q; must be 'cloudflare' or 'direct'", trustedProxy)
 	}
 	if trustedProxy == authmw.TrustedProxyCloudflare {
-		// Finding 11: when trusting Cloudflare headers the server MUST only be
-		// reachable via the Cloudflare Tunnel.  Direct access (e.g. an exposed
-		// Kubernetes NodePort) would let any caller forge CF-Connecting-IP and
-		// bypass rate-limiting.  Ensure NetworkPolicy / firewall rules deny all
-		// ingress that does not originate from the tunnel sidecar.
 		log.Println("INFO: trusted-proxy mode is 'cloudflare'. Ensure the server is" +
 			" exclusively reachable via Cloudflare Tunnel; direct access bypasses IP security.")
 	}
@@ -59,6 +47,10 @@ func main() {
 
 	database := db.Connect(dsn)
 	db.AutoMigrate(database)
+
+	if err := db.Migrate(database); err != nil {
+		log.Fatalf("migrations failed: %v", err)
+	}
 
 	competitorSvc := service.NewCompetitorService(database)
 	authSvc := service.NewAuthService(database, pin)
@@ -82,8 +74,6 @@ func main() {
 	}))
 	r.Use(chimw.Recoverer)
 
-	// Store the IP resolver in every request context so handlers call
-	// authmw.ClientIP(r) rather than the hard-coded GetClientIP helper.
 	r.Use(authmw.WithIPResolver(ipResolver))
 
 	r.Use(authmw.IPBlocklist(authSvc))
@@ -133,6 +123,7 @@ func main() {
 
 			r.Post("/api/events", createEvent(eventSvc, auditSvc))
 			r.Patch("/api/events/{id}/current", setCurrentEvent(eventSvc, auditSvc))
+			r.Post("/api/events/{id}/roster/copy-from/{sourceId}", copyEventRoster(eventSvc, auditSvc))
 
 			r.Get("/api/staff", listStaff(staffSvc))
 			r.Patch("/api/staff/{id}/role", updateStaffRole(staffSvc, auditSvc))

@@ -1,0 +1,34 @@
+{{/*
+Runs ordered SQL migrations before the API rolls to the new image, so pods never
+serve traffic against a schema they do not expect. Upgrade only — on a fresh
+install there are no tables yet, and the API creates them via AutoMigrate and
+then applies migrations itself at startup.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-migrate
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+    app: agm-migrate
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    # Failed jobs are left behind on purpose so the logs can be read.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: agm-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: {{ .Values.api.image }}:{{ .Values.api.tag }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["/app/migrate"]
+          env:
+            - name: DATABASE_URL
+              value: "host={{ .Release.Name }}-postgres user={{ .Values.postgres.user }} password={{ .Values.postgres.password }} dbname={{ .Values.postgres.db }} port=5432 sslmode=disable"

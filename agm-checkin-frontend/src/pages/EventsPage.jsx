@@ -18,9 +18,15 @@ import TextField from '@mui/material/TextField'
 import Alert from '@mui/material/Alert'
 import Skeleton from '@mui/material/Skeleton'
 import Tooltip from '@mui/material/Tooltip'
+import Select from '@mui/material/Select'
+import MenuItem from '@mui/material/MenuItem'
+import FormControl from '@mui/material/FormControl'
+import InputLabel from '@mui/material/InputLabel'
+import CircularProgress from '@mui/material/CircularProgress'
 import StarIcon from '@mui/icons-material/Star'
 import StarBorderIcon from '@mui/icons-material/StarBorder'
-import { listEvents, createEvent, setCurrentEvent } from '../api/events'
+import GroupAddIcon from '@mui/icons-material/GroupAdd'
+import { listEvents, createEvent, setCurrentEvent, copyRoster } from '../api/events'
 
 export default function EventsPage() {
   const [events, setEvents] = useState([])
@@ -32,6 +38,13 @@ export default function EventsPage() {
   const [form, setForm] = useState({ id: '', name: '', startDate: '', endDate: '' })
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [copyTarget, setCopyTarget] = useState(null)
+  const [copySource, setCopySource] = useState('')
+  const [preview, setPreview] = useState(null)
+  const [previewing, setPreviewing] = useState(false)
+  const [copying, setCopying] = useState(false)
+  const [copyError, setCopyError] = useState('')
+  const [copyResult, setCopyResult] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -82,6 +95,42 @@ export default function EventsPage() {
       setError(err.message || 'Failed to set current event.')
     } finally {
       setSettingCurrent(null)
+    }
+  }
+
+  function openCopy(event) {
+    setCopyTarget(event)
+    setCopySource('')
+    setPreview(null)
+    setCopyError('')
+    setCopyResult(null)
+  }
+
+  async function handleSourceChange(sourceId) {
+    setCopySource(sourceId)
+    setPreview(null)
+    setCopyError('')
+    setCopyResult(null)
+    if (!sourceId) return
+    setPreviewing(true)
+    try {
+      setPreview(await copyRoster(copyTarget.id, sourceId, { dryRun: true }))
+    } catch (err) {
+      setCopyError(err.message || 'Failed to preview the carry-forward.')
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  async function handleCopy() {
+    setCopying(true)
+    setCopyError('')
+    try {
+      setCopyResult(await copyRoster(copyTarget.id, copySource))
+    } catch (err) {
+      setCopyError(err.message || 'Failed to copy the roster.')
+    } finally {
+      setCopying(false)
     }
   }
 
@@ -141,25 +190,101 @@ export default function EventsPage() {
                       )}
                     </TableCell>
                     <TableCell align="right">
-                      <Tooltip title={event.isCurrent ? 'Already current event' : 'Set as current event'}>
-                        <span>
+                      <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                        <Tooltip title="Add another event's competitors to this roster">
                           <Button
                             size="small"
-                            variant={event.isCurrent ? 'contained' : 'outlined'}
-                            startIcon={event.isCurrent ? <StarIcon /> : <StarBorderIcon />}
-                            disabled={event.isCurrent || settingCurrent === event.id}
-                            onClick={() => handleSetCurrent(event.id)}
+                            variant="outlined"
+                            startIcon={<GroupAddIcon />}
+                            onClick={() => openCopy(event)}
                           >
-                            {event.isCurrent ? 'Current' : settingCurrent === event.id ? 'Setting…' : 'Set Current'}
+                            Carry Forward
                           </Button>
-                        </span>
-                      </Tooltip>
+                        </Tooltip>
+                        <Tooltip title={event.isCurrent ? 'Already current event' : 'Set as current event'}>
+                          <span>
+                            <Button
+                              size="small"
+                              variant={event.isCurrent ? 'contained' : 'outlined'}
+                              startIcon={event.isCurrent ? <StarIcon /> : <StarBorderIcon />}
+                              disabled={event.isCurrent || settingCurrent === event.id}
+                              onClick={() => handleSetCurrent(event.id)}
+                            >
+                              {event.isCurrent ? 'Current' : settingCurrent === event.id ? 'Setting…' : 'Set Current'}
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      </Box>
                     </TableCell>
                   </TableRow>
                 ))}
           </TableBody>
         </Table>
       </TableContainer>
+
+      <Dialog open={!!copyTarget} onClose={() => !copying && setCopyTarget(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Carry Forward Roster</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Adds every competitor from the event you pick to{' '}
+              <strong>{copyTarget?.name}</strong>. Nobody is marked as checked in, and
+              anyone already on this roster is left untouched.
+            </Typography>
+
+            <FormControl fullWidth>
+              <InputLabel>Copy From</InputLabel>
+              <Select
+                value={copySource}
+                label="Copy From"
+                disabled={copying || !!copyResult}
+                onChange={e => handleSourceChange(e.target.value)}
+              >
+                {events.filter(e => e.id !== copyTarget?.id).map(e => (
+                  <MenuItem key={e.id} value={e.id}>{e.name} ({e.id})</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {previewing && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CircularProgress size={16} />
+                <Typography variant="body2" color="text.secondary">Checking…</Typography>
+              </Box>
+            )}
+
+            {preview && !copyResult && (
+              <Alert severity={preview.copied > 0 ? 'info' : 'warning'}>
+                {preview.copied > 0
+                  ? `${preview.copied} of ${preview.sourceRoster} competitors will be added. ${preview.alreadyOnTarget} are already on this roster.`
+                  : `Nothing to add — all ${preview.sourceRoster} competitors are already on this roster.`}
+              </Alert>
+            )}
+
+            {copyResult && (
+              <Alert severity="success">
+                Added {copyResult.copied} competitor{copyResult.copied === 1 ? '' : 's'} to {copyTarget?.name}.
+              </Alert>
+            )}
+
+            {copyError && <Alert severity="error">{copyError}</Alert>}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setCopyTarget(null)} disabled={copying}>
+            {copyResult ? 'Done' : 'Cancel'}
+          </Button>
+          {!copyResult && (
+            <Button
+              variant="contained"
+              onClick={handleCopy}
+              disabled={copying || previewing || !preview || preview.copied === 0}
+            >
+              {copying ? 'Copying…' : `Add ${preview?.copied ?? 0}`}
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>New Event</DialogTitle>

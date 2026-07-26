@@ -14,27 +14,26 @@ import (
 
 // ImportRow represents one row from a normalized import CSV.
 type ImportRow struct {
-	NameFirst          string
-	NameLast           string
-	Studio             string
-	Teacher            string
-	Email              string
-	ShirtSize          string
-	DateOfBirth        *time.Time // nil if unknown
-	RequiresValidation bool
-	Validated          bool
-	Events             []string // event IDs sorted oldest→newest, e.g. ["nat-2024","glr-2026"]
+	NameFirst   string
+	NameLast    string
+	Studio      string
+	Teacher     string
+	Email       string
+	ShirtSize   string
+	DateOfBirth *time.Time // nil if unknown
+	Validated   bool
+	Events      []string // event IDs sorted oldest→newest, e.g. ["nat-2024","glr-2026"]
 }
 
 // ImportResult summarises what was inserted during a BulkImport call.
 type ImportResult struct {
-	CompetitorsCreated int            `json:"competitorsCreated"`
-	CompetitorsMatched int            `json:"competitorsMatched"`
-	FieldsUpdated      int            `json:"fieldsUpdated"`
-	EventsCreated      int            `json:"eventsCreated"`
-	EventEntriesAdded  int            `json:"eventEntriesAdded"`
+	CompetitorsCreated int             `json:"competitorsCreated"`
+	CompetitorsMatched int             `json:"competitorsMatched"`
+	FieldsUpdated      int             `json:"fieldsUpdated"`
+	EventsCreated      int             `json:"eventsCreated"`
+	EventEntriesAdded  int             `json:"eventEntriesAdded"`
 	FieldConflicts     []FieldConflict `json:"fieldConflicts,omitempty"`
-	Errors             []string       `json:"errors,omitempty"`
+	Errors             []string        `json:"errors,omitempty"`
 }
 
 // FieldConflict is returned when an import row has a value for a field that differs from the
@@ -43,39 +42,39 @@ type ImportResult struct {
 type FieldConflict struct {
 	CompetitorID  string `json:"competitorId"`
 	Name          string `json:"name"`
-	Field         string `json:"field"`         // JSON field name: "email", "studio", "teacher", "shirtSize", "dateOfBirth"
+	Field         string `json:"field"` // JSON field name: "email", "studio", "teacher", "shirtSize", "dateOfBirth"
 	ExistingValue string `json:"existingValue"`
 	ImportValue   string `json:"importValue"`
 }
 
-// eventOrder is the canonical chronological order for determining LastRegisteredEvent.
-var eventOrder = []string{"nat-2024", "glr-2025", "nat-2025", "glr-2026", "nat-2026"}
+// backupRetention is how many import snapshots to keep. Snapshots exist to undo
+// the import that just ran, so older ones are dead weight — before this was
+// enforced they accumulated indefinitely.
+const backupRetention = 3
 
-func eventRank(id string) int {
-	for i, e := range eventOrder {
-		if e == id {
-			return i
+// pruneBackups drops all but the newest keep snapshot pairs. Table names are
+// built from the integer suffixes returned by the catalog query, never from
+// caller input.
+func (s *CompetitorService) pruneBackups(keep int) error {
+	var suffixes []int64
+	if err := s.db.Raw(`
+		SELECT DISTINCT (substring(table_name from '_backup_(\d+)$'))::bigint AS suffix
+		FROM information_schema.tables
+		WHERE table_schema = 'public'
+		  AND table_name ~ '^competitors_backup_\d+$'
+		ORDER BY suffix DESC
+		OFFSET ?
+	`, keep).Scan(&suffixes).Error; err != nil {
+		return fmt.Errorf("listing backup tables: %w", err)
+	}
+	for _, suffix := range suffixes {
+		if err := s.db.Exec(fmt.Sprintf(
+			"DROP TABLE IF EXISTS competitors_backup_%d, competitor_events_backup_%d", suffix, suffix,
+		)).Error; err != nil {
+			return fmt.Errorf("dropping backup snapshot %d: %w", suffix, err)
 		}
 	}
-	return -1
-}
-
-// mostRecentEvent returns the most recent event ID from a list according to the canonical order.
-// Unknown event IDs are ranked last so they don't displace known ones.
-func mostRecentEvent(events []string) string {
-	best := ""
-	bestRank := -2
-	for _, e := range events {
-		r := eventRank(e)
-		if r == -1 {
-			r = len(eventOrder) // treat unknown as after all known
-		}
-		if r > bestRank {
-			bestRank = r
-			best = e
-		}
-	}
-	return best
+	return nil
 }
 
 // nameKey returns a normalised lookup key for a competitor name.
@@ -90,15 +89,21 @@ func nameKey(first, last string) string {
 // competitor records. Stub event records are auto-created for any event ID not yet in the DB.
 func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) {
 	result := &ImportResult{}
+	importedAt := time.Now()
 
 	// --- 1. Backup existing tables so the import can be rolled back if needed. ---
-	ts := time.Now().Unix()
+	ts := importedAt.Unix()
 	backupSQL := fmt.Sprintf(`
 		CREATE TABLE competitors_backup_%d AS SELECT * FROM competitors;
 		CREATE TABLE competitor_events_backup_%d AS SELECT * FROM competitor_events;
 	`, ts, ts)
 	if err := s.db.Exec(backupSQL).Error; err != nil {
 		return nil, fmt.Errorf("creating backup tables: %w", err)
+	}
+	if err := s.pruneBackups(backupRetention); err != nil {
+		// The import itself succeeded in taking its snapshot; failing to tidy up
+		// older ones is not a reason to refuse the import.
+		result.Errors = append(result.Errors, fmt.Sprintf("pruning old backup tables: %v", err))
 	}
 
 	// --- 2. Load all existing competitors and build a name → []Competitor lookup map. ---
@@ -200,12 +205,6 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 				autoFill["shirt_size"] = row.ShirtSize
 			}
 
-			// Update lastRegisteredEvent when incoming events include something newer.
-			if incoming := mostRecentEvent(row.Events); incoming != "" &&
-				eventRank(incoming) > eventRank(existing.LastRegisteredEvent) {
-				autoFill["last_registered_event"] = incoming
-			}
-
 			// Date of birth: zero→fill auto; both set and differ→conflict.
 			if row.DateOfBirth != nil {
 				importDOB := row.DateOfBirth.UTC().Truncate(24 * time.Hour)
@@ -242,17 +241,27 @@ func (s *CompetitorService) BulkImport(rows []ImportRow) (*ImportResult, error) 
 		if row.DateOfBirth != nil {
 			dob = *row.DateOfBirth
 		}
+
+		// A CSV can assert a competitor was verified, but not that we hold the
+		// date it was verified against — without a DOB the claim is unusable, so
+		// they get checked at the desk instead.
+		var verifiedAt *time.Time
+		verifiedBy := ""
+		if row.Validated && !dob.IsZero() {
+			verifiedAt = &importedAt
+			verifiedBy = "historical import"
+		}
+
 		toCreate = append(toCreate, db.Competitor{
-			NameFirst:           strings.TrimSpace(row.NameFirst),
-			NameLast:            strings.TrimSpace(row.NameLast),
-			Studio:              row.Studio,
-			Teacher:             row.Teacher,
-			Email:               row.Email,
-			ShirtSize:           row.ShirtSize,
-			DateOfBirth:         dob,
-			RequiresValidation:  row.RequiresValidation,
-			Validated:           row.Validated,
-			LastRegisteredEvent: mostRecentEvent(row.Events),
+			NameFirst:     strings.TrimSpace(row.NameFirst),
+			NameLast:      strings.TrimSpace(row.NameLast),
+			Studio:        row.Studio,
+			Teacher:       row.Teacher,
+			Email:         row.Email,
+			ShirtSize:     row.ShirtSize,
+			DateOfBirth:   dob,
+			DobVerifiedAt: verifiedAt,
+			DobVerifiedBy: verifiedBy,
 		})
 		toCreateIdx = append(toCreateIdx, i)
 	}
@@ -322,6 +331,11 @@ func eventDisplayName(id string) string {
 type CompetitorWithCheckIn struct {
 	db.Competitor
 	CurrentCheckIn *db.CompetitorEvent `json:"currentCheckIn"`
+
+	// MostRecentEvent is derived from competitor_events on every read rather
+	// than stored, so it cannot drift from the attendance rows the way
+	// LastRegisteredEvent did.
+	MostRecentEvent string `json:"mostRecentEvent"`
 }
 
 // CompetitorEventWithEvent is used for the per-competitor history endpoint.
@@ -353,11 +367,17 @@ func (s *CompetitorService) GetAll(search string, adminView bool) ([]CompetitorW
 	query := s.db.Model(&db.Competitor{})
 
 	// Registration users only see competitors registered for the current event.
+	// Registration is an attendance row, not a column on the competitor: a
+	// single text field cannot express being registered for two events at once,
+	// which is what forced a full re-import to open every new event.
 	if !adminView {
 		if eventID == "" {
 			return []CompetitorWithCheckIn{}, nil
 		}
-		query = query.Where("last_registered_event = ?", eventID)
+		query = query.Where(
+			"EXISTS (SELECT 1 FROM competitor_events ce WHERE ce.competitor_id = competitors.id AND ce.event_id = ?)",
+			eventID,
+		)
 	}
 
 	if search != "" {
@@ -380,13 +400,14 @@ func (s *CompetitorService) GetAll(search string, adminView bool) ([]CompetitorW
 		return []CompetitorWithCheckIn{}, nil
 	}
 
+	ids := make([]string, len(competitors))
+	for i, c := range competitors {
+		ids[i] = c.ID
+	}
+
 	// Attach current-event check-in records.
 	checkInMap := map[string]*db.CompetitorEvent{}
 	if eventID != "" {
-		ids := make([]string, len(competitors))
-		for i, c := range competitors {
-			ids[i] = c.ID
-		}
 		var checkIns []db.CompetitorEvent
 		if err := s.db.Where("competitor_id IN ? AND event_id = ?", ids, eventID).Find(&checkIns).Error; err != nil {
 			return nil, err
@@ -397,14 +418,47 @@ func (s *CompetitorService) GetAll(search string, adminView bool) ([]CompetitorW
 		}
 	}
 
+	recentMap, err := s.mostRecentEvents(ids)
+	if err != nil {
+		return nil, err
+	}
+
 	result := make([]CompetitorWithCheckIn, len(competitors))
 	for i, c := range competitors {
 		result[i] = CompetitorWithCheckIn{
-			Competitor:     c,
-			CurrentCheckIn: checkInMap[c.ID],
+			Competitor:      c,
+			CurrentCheckIn:  checkInMap[c.ID],
+			MostRecentEvent: recentMap[c.ID],
 		}
 	}
 	return result, nil
+}
+
+// mostRecentEvents resolves each competitor's latest event by start date. Stub
+// events with no date on file carry the zero time and so lose to any dated
+// event, which matches how the roster is actually ordered.
+func (s *CompetitorService) mostRecentEvents(competitorIDs []string) (map[string]string, error) {
+	if len(competitorIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	var rows []struct {
+		CompetitorID string
+		EventID      string
+	}
+	if err := s.db.Raw(`
+		SELECT DISTINCT ON (ce.competitor_id) ce.competitor_id, ce.event_id
+		FROM competitor_events ce
+		JOIN events e ON e.id = ce.event_id
+		WHERE ce.competitor_id IN ?
+		ORDER BY ce.competitor_id, e.start_date DESC, ce.event_id DESC
+	`, competitorIDs).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("resolving most recent events: %w", err)
+	}
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[r.CompetitorID] = r.EventID
+	}
+	return out, nil
 }
 
 func (s *CompetitorService) GetByID(id string) (*CompetitorWithCheckIn, error) {
@@ -422,11 +476,42 @@ func (s *CompetitorService) GetByID(id string) (*CompetitorWithCheckIn, error) {
 			result.CurrentCheckIn = &ce
 		}
 	}
+
+	recentMap, err := s.mostRecentEvents([]string{competitor.ID})
+	if err != nil {
+		return nil, err
+	}
+	result.MostRecentEvent = recentMap[competitor.ID]
 	return result, nil
 }
 
-func (s *CompetitorService) Create(competitor *db.Competitor) error {
-	return s.db.Create(competitor).Error
+func (s *CompetitorService) Create(competitor *db.Competitor, staffName string) error {
+	applyDobVerification(competitor, nil, staffName)
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(competitor).Error; err != nil {
+			return err
+		}
+		return registerForEvent(tx, competitor.ID, competitor.RegisterForEvent)
+	})
+}
+
+// registerForEvent puts a competitor on an event roster if they are not on it
+// already. Attendance rows are what make someone visible to registration staff,
+// so adding or editing a competitor has to write one — setting the event field
+// alone would leave them registered on paper and invisible in the app.
+func registerForEvent(tx *gorm.DB, competitorID, eventID string) error {
+	if eventID == "" {
+		return nil
+	}
+	var known int64
+	if err := tx.Model(&db.Event{}).Where("id = ?", eventID).Count(&known).Error; err != nil {
+		return fmt.Errorf("checking event %s: %w", eventID, err)
+	}
+	if known == 0 {
+		return fmt.Errorf("%w: %s", ErrUnknownEvent, eventID)
+	}
+	ce := db.CompetitorEvent{CompetitorID: competitorID, EventID: eventID}
+	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&ce).Error
 }
 
 func (s *CompetitorService) CheckIn(id string, staffName string) (*CompetitorWithCheckIn, error) {
@@ -456,19 +541,24 @@ func (s *CompetitorService) CheckIn(id string, staffName string) (*CompetitorWit
 		return nil, err
 	}
 
-	// Re-fetch to get the ID if it was an update (upsert may not populate ID on conflict path).
-	s.db.Where("competitor_id = ? AND event_id = ?", id, eventID).First(&ce)
-
-	// Keep lastRegisteredEvent in sync so the competitor stays visible
-	// to registration users for this event.
-	if competitor.LastRegisteredEvent != eventID {
-		if err := s.db.Model(&competitor).Update("last_registered_event", eventID).Error; err != nil {
-			return nil, fmt.Errorf("updating last registered event: %w", err)
-		}
-		competitor.LastRegisteredEvent = eventID
+	// Reload the stored row. On the conflict path BeforeCreate has already
+	// overwritten ce.ID with a freshly generated UUID that was never persisted,
+	// and GORM would otherwise use that stale primary key as a query condition.
+	ce.ID = ""
+	if err := s.db.Where("competitor_id = ? AND event_id = ?", id, eventID).First(&ce).Error; err != nil {
+		return nil, fmt.Errorf("reloading check-in record: %w", err)
 	}
 
-	return &CompetitorWithCheckIn{Competitor: competitor, CurrentCheckIn: &ce}, nil
+	recentMap, err := s.mostRecentEvents([]string{id})
+	if err != nil {
+		return nil, err
+	}
+
+	return &CompetitorWithCheckIn{
+		Competitor:      competitor,
+		CurrentCheckIn:  &ce,
+		MostRecentEvent: recentMap[id],
+	}, nil
 }
 
 func (s *CompetitorService) UpdateDOB(id string, dob time.Time) (*db.Competitor, error) {
@@ -483,21 +573,28 @@ func (s *CompetitorService) UpdateDOB(id string, dob time.Time) (*db.Competitor,
 	return &competitor, nil
 }
 
-func (s *CompetitorService) Validate(id string) (*db.Competitor, error) {
+// Validate records that staff confirmed this competitor's date of birth against
+// ID. It is idempotent: re-verifying an already-verified competitor keeps the
+// original timestamp and staff name rather than overwriting the provenance.
+func (s *CompetitorService) Validate(id, staffName string) (*db.Competitor, error) {
 	var competitor db.Competitor
 	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
-	// Finding 12: reject the call if the competitor does not require validation.
-	// This prevents any authenticated staff member from arbitrarily marking
-	// competitors as validated when no identity check was intended.
-	if !competitor.RequiresValidation {
-		return nil, ErrValidationNotRequired
+	if competitor.DobVerifiedAt != nil {
+		return &competitor, nil
 	}
-	if err := s.db.Model(&competitor).Update("validated", true).Error; err != nil {
+	// Postgres timestamptz holds microseconds; truncate so the value we return
+	// matches the value that was actually stored.
+	now := time.Now().Truncate(time.Microsecond)
+	if err := s.db.Model(&competitor).Updates(map[string]any{
+		"dob_verified_at": now,
+		"dob_verified_by": staffName,
+	}).Error; err != nil {
 		return nil, err
 	}
-	competitor.Validated = true
+	competitor.DobVerifiedAt = &now
+	competitor.DobVerifiedBy = staffName
 	return &competitor, nil
 }
 
@@ -528,13 +625,19 @@ func (s *CompetitorService) UpdateContact(id string, note *string, email *string
 	return &competitor, nil
 }
 
-func (s *CompetitorService) Update(id string, input db.Competitor) (*db.Competitor, error) {
+func (s *CompetitorService) Update(id string, input db.Competitor, staffName string) (*db.Competitor, error) {
 	var competitor db.Competitor
 	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
 	input.ID = competitor.ID
-	if err := s.db.Save(&input).Error; err != nil {
+	applyDobVerification(&input, &competitor, staffName)
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&input).Error; err != nil {
+			return err
+		}
+		return registerForEvent(tx, input.ID, input.RegisterForEvent)
+	}); err != nil {
 		return nil, err
 	}
 	return &input, nil
@@ -583,9 +686,30 @@ func (s *CompetitorService) GetEventHistory(competitorID string) ([]CompetitorEv
 // ErrNotFound is returned when a competitor record does not exist.
 var ErrNotFound = errors.New("competitor not found")
 
-// ErrValidationNotRequired is returned when staff attempt to validate a
-// competitor whose requiresValidation flag is false.  Calling /validate on
-// a competitor who does not require identity verification is a no-op from a
-// safety perspective and most likely indicates a programming error or an
-// attempt to set the validated flag on arbitrary records (Finding 12).
-var ErrValidationNotRequired = errors.New("competitor does not require identity validation")
+// ErrUnknownEvent is returned when a competitor is assigned to an event ID that
+// does not exist, which would otherwise surface as a foreign key violation.
+var ErrUnknownEvent = errors.New("unknown event")
+
+// applyDobVerification resolves the verification state the client asked for
+// against what is already stored. The client only gets to say whether the
+// competitor is verified; when and by whom are always decided here, so a caller
+// cannot forge provenance. An existing verification is never re-stamped.
+func applyDobVerification(input *db.Competitor, existing *db.Competitor, staffName string) {
+	var stored *db.Competitor
+	if existing != nil {
+		stored = existing
+	}
+	switch {
+	case input.DobVerifiedAt == nil:
+		input.DobVerifiedBy = ""
+	case stored != nil && stored.DobVerifiedAt != nil:
+		input.DobVerifiedAt = stored.DobVerifiedAt
+		input.DobVerifiedBy = stored.DobVerifiedBy
+	default:
+		// Postgres timestamptz holds microseconds; truncate so the value we
+		// return matches the value that was actually stored.
+		now := time.Now().Truncate(time.Microsecond)
+		input.DobVerifiedAt = &now
+		input.DobVerifiedBy = staffName
+	}
+}

@@ -10,18 +10,26 @@ import (
 )
 
 type Competitor struct {
-	ID                  string    `gorm:"primaryKey;type:uuid" json:"id"`
-	NameFirst           string    `json:"nameFirst"`
-	NameLast            string    `gorm:"index" json:"nameLast"`
-	DateOfBirth         time.Time `json:"dateOfBirth"`
-	RequiresValidation  bool      `json:"requiresValidation"`
-	Validated           bool      `json:"validated"`
-	ShirtSize           string    `json:"shirtSize"`
-	Email               string    `json:"email"`
-	Teacher             string    `json:"teacher"`
-	Studio              string    `json:"studio"`
-	LastRegisteredEvent string    `gorm:"index" json:"lastRegisteredEvent"`
-	Note                string    `json:"note"`
+	ID          string    `gorm:"primaryKey;type:uuid" json:"id"`
+	NameFirst   string    `json:"nameFirst"`
+	NameLast    string    `gorm:"index" json:"nameLast"`
+	DateOfBirth time.Time `json:"dateOfBirth"`
+	ShirtSize   string    `json:"shirtSize"`
+	Email       string    `json:"email"`
+	Teacher     string    `json:"teacher"`
+	Studio      string    `json:"studio"`
+	Note        string    `json:"note"`
+
+	// DobVerifiedAt is the single source of truth for identity verification:
+	// nil means the date of birth has not been confirmed against ID yet.
+	// Verification is permanent, so this is never cleared by the check-in flow.
+	DobVerifiedAt *time.Time `json:"dobVerifiedAt"`
+	DobVerifiedBy string     `gorm:"not null;default:''" json:"dobVerifiedBy"`
+
+	// RegisterForEvent is request-only: it tells Create and Update which event's
+	// roster to add this competitor to. Attendance lives in competitor_events,
+	// so there is no column behind it.
+	RegisterForEvent string `gorm:"-" json:"registerForEvent,omitempty"`
 }
 
 // Event represents a competition event (e.g. "glr-2026").
@@ -35,9 +43,10 @@ type Event struct {
 
 // CompetitorEvent records a competitor's participation in a specific event.
 // The unique index on (competitor_id, event_id) ensures one row per competitor per event.
+// Foreign keys to competitors and events are owned by migration 001, not by AutoMigrate.
 type CompetitorEvent struct {
 	ID              string     `gorm:"primaryKey;type:uuid" json:"id"`
-	CompetitorID    string     `gorm:"not null;uniqueIndex:idx_competitor_event" json:"competitorId"`
+	CompetitorID    string     `gorm:"type:uuid;not null;uniqueIndex:idx_competitor_event" json:"competitorId"`
 	EventID         string     `gorm:"not null;uniqueIndex:idx_competitor_event" json:"eventId"`
 	CheckedIn       bool       `gorm:"not null;default:false" json:"checkedIn"`
 	CheckInDatetime *time.Time `json:"checkInDatetime"` // null for historical imports
@@ -65,9 +74,10 @@ func (ce *CompetitorEvent) BeforeCreate(tx *gorm.DB) error {
 // CompetitorSchedule records a single scheduled slot for a competitor at a specific event.
 // One competitor may have multiple rows (e.g. Sight Reading + Test List on different days).
 // SortOrder is pre-computed at import time (minutes since midnight) and used for ORDER BY.
+// Foreign keys to competitors and events are owned by migration 001, not by AutoMigrate.
 type CompetitorSchedule struct {
 	ID           string    `gorm:"primaryKey;type:uuid" json:"id"`
-	CompetitorID string    `gorm:"not null;index:idx_cs_competitor_event" json:"competitorId"`
+	CompetitorID string    `gorm:"type:uuid;not null;index:idx_cs_competitor_event" json:"competitorId"`
 	EventID      string    `gorm:"not null;index:idx_cs_competitor_event" json:"eventId"`
 	Instrument   string    `gorm:"not null" json:"instrument"`
 	ScheduleDate time.Time `gorm:"not null;type:date" json:"scheduleDate"`

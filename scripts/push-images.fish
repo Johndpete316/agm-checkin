@@ -59,10 +59,15 @@ for node in $NODES
 end
 
 echo ""
-echo "==> Deploying via Helm..."
+echo "==> Deploying via Helm (runs the migrate pre-upgrade hook first)..."
 helm upgrade --install agm-checkin ../helm/agm-checkin \
     -f ../helm/agm-checkin/values.secret.yaml
-or begin; echo "Helm upgrade failed"; exit 1; end
+or begin
+    echo "Helm upgrade failed."
+    echo "If the migrate job failed, inspect it with:"
+    echo "  kubectl logs job/agm-checkin-migrate"
+    exit 1
+end
 
 echo ""
 echo "==> Restarting deployments to pick up new images..."

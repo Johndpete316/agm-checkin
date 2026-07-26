@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm/clause"
+
 	"johndpete316/agm-checkin-api/internal/db"
 )
 
@@ -65,8 +67,17 @@ var teachers = []string{
 
 var shirtSizes = []string{"XS", "S", "M", "L", "XL", "XXL"}
 
-// Valid event codes — the current event is glr-2026
-var validEvents = []string{"glr-2026", "nat-2025", "glr-2025", "nat-2024"}
+// Seeded events, oldest first. glr-2026 is the current one.
+var seedEvents = []db.Event{
+	{ID: "nat-2024", Name: "Nationals 2024", StartDate: date(2024, 7, 12), EndDate: date(2024, 7, 14)},
+	{ID: "glr-2025", Name: "Great Lakes 2025", StartDate: date(2025, 3, 15), EndDate: date(2025, 3, 17)},
+	{ID: "nat-2025", Name: "Nationals 2025", StartDate: date(2025, 7, 11), EndDate: date(2025, 7, 13)},
+	{ID: "glr-2026", Name: "Great Lakes 2026", StartDate: date(2026, 3, 14), EndDate: date(2026, 3, 16), IsCurrent: true},
+}
+
+func date(y int, m time.Month, d int) time.Time {
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
 
 // Spread check-ins across 3 event days
 var eventDays = []time.Time{
@@ -103,6 +114,13 @@ func main() {
 	db.AutoMigrate(database)
 	database.Where("1 = 1").Delete(&db.Competitor{})
 
+	// Roster rows carry a foreign key to events, so the events have to exist first.
+	for _, event := range seedEvents {
+		if err := database.Clauses(clause.OnConflict{DoNothing: true}).Create(&event).Error; err != nil {
+			log.Fatal("failed to seed events:", err)
+		}
+	}
+
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	var competitors []db.Competitor
@@ -118,22 +136,22 @@ func main() {
 		seen[key] = true
 
 		dob := randomDOB(rng)
-		age := 2026 - dob.Year()
 
-		// Competitors under 18 require age/identity validation
-		requiresValidation := age < 18
+		// Most competitors had their ID checked at a previous event; the rest
+		// still need verifying at the desk.
+		verified := rng.Float32() < 0.7
 
-		// If validation isn't required the competitor is considered validated.
-		// If it is required, randomly mark some as already validated to simulate
-		// staff having processed them ahead of time.
-		validated := !requiresValidation
-		if requiresValidation {
-			validated = rng.Float32() < 0.5
+		// Some of the unverified have no DOB on file at all.
+		if !verified && rng.Float32() < 0.35 {
+			dob = time.Time{}
 		}
 
-		// Some minors have DOB missing — leave as zero time to represent unknown
-		if requiresValidation && rng.Float32() < 0.35 {
-			dob = time.Time{}
+		var verifiedAt *time.Time
+		verifiedBy := ""
+		if verified {
+			when := time.Now().AddDate(0, -(rng.Intn(18) + 1), 0)
+			verifiedAt = &when
+			verifiedBy = "historical import"
 		}
 
 		email := fmt.Sprintf("%s.%s@example.com",
@@ -142,16 +160,15 @@ func main() {
 		)
 
 		competitors = append(competitors, db.Competitor{
-			NameFirst:           first,
-			NameLast:            last,
-			DateOfBirth:         dob,
-			RequiresValidation:  requiresValidation,
-			Validated:           validated,
-			ShirtSize:           shirtSizes[rng.Intn(len(shirtSizes))],
-			Email:               email,
-			Teacher:             teachers[rng.Intn(len(teachers))],
-			Studio:              studios[rng.Intn(len(studios))],
-			LastRegisteredEvent: validEvents[rng.Intn(len(validEvents))],
+			NameFirst:     first,
+			NameLast:      last,
+			DateOfBirth:   dob,
+			DobVerifiedAt: verifiedAt,
+			DobVerifiedBy: verifiedBy,
+			ShirtSize:     shirtSizes[rng.Intn(len(shirtSizes))],
+			Email:         email,
+			Teacher:       teachers[rng.Intn(len(teachers))],
+			Studio:        studios[rng.Intn(len(studios))],
 		})
 	}
 
@@ -160,5 +177,18 @@ func main() {
 		log.Fatal("failed to seed competitors:", result.Error)
 	}
 
-	log.Printf("seeded %d competitors", len(competitors))
+	// Attendance is what makes a competitor visible to registration staff, so a
+	// seeded database is useless without roster rows.
+	var roster []db.CompetitorEvent
+	for _, c := range competitors {
+		roster = append(roster, db.CompetitorEvent{
+			CompetitorID: c.ID,
+			EventID:      seedEvents[rng.Intn(len(seedEvents))].ID,
+		})
+	}
+	if err := database.Create(&roster).Error; err != nil {
+		log.Fatal("failed to seed rosters:", err)
+	}
+
+	log.Printf("seeded %d competitors across %d events", len(competitors), len(seedEvents))
 }

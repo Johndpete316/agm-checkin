@@ -46,11 +46,15 @@ func createCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
-		if err := svc.Create(&competitor); err != nil {
-			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		actorID, actorName := actorFrom(r)
+		if err := svc.Create(&competitor, actorName); err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, service.ErrUnknownEvent) {
+				status = http.StatusBadRequest
+			}
+			respondJSON(w, status, map[string]string{"error": err.Error()})
 			return
 		}
-		actorID, actorName := actorFrom(r)
 		audit.Log(service.LogEntry{
 			ActorID:    actorID,
 			ActorName:  actorName,
@@ -58,7 +62,7 @@ func createCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 			EntityType: "competitor",
 			EntityID:   competitor.ID,
 			EntityName: competitor.NameFirst + " " + competitor.NameLast,
-			Detail:     map[string]any{"studio": competitor.Studio, "lastRegisteredEvent": competitor.LastRegisteredEvent},
+			Detail:     map[string]any{"studio": competitor.Studio, "registeredFor": competitor.RegisterForEvent},
 			IP:         authmw.ClientIP(r),
 		})
 		respondJSON(w, http.StatusCreated, competitor)
@@ -156,19 +160,12 @@ func updateCompetitorContact(svc *service.CompetitorService, audit *service.Audi
 func validateCompetitor(svc *service.CompetitorService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		competitor, err := svc.Validate(id)
+		actorID, actorName := actorFrom(r)
+		competitor, err := svc.Validate(id, actorName)
 		if err != nil {
-			switch {
-			case errors.Is(err, service.ErrValidationNotRequired):
-				respondJSON(w, http.StatusConflict, map[string]string{
-					"error": "competitor does not require identity validation",
-				})
-			default:
-				respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			}
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		actorID, actorName := actorFrom(r)
 		audit.Log(service.LogEntry{
 			ActorID:    actorID,
 			ActorName:  actorName,
@@ -190,12 +187,16 @@ func updateCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
-		competitor, err := svc.Update(id, input)
+		actorID, actorName := actorFrom(r)
+		competitor, err := svc.Update(id, input, actorName)
 		if err != nil {
-			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			status := http.StatusInternalServerError
+			if errors.Is(err, service.ErrUnknownEvent) {
+				status = http.StatusBadRequest
+			}
+			respondJSON(w, status, map[string]string{"error": err.Error()})
 			return
 		}
-		actorID, actorName := actorFrom(r)
 		audit.Log(service.LogEntry{
 			ActorID:    actorID,
 			ActorName:  actorName,
@@ -204,9 +205,9 @@ func updateCompetitor(svc *service.CompetitorService, audit *service.AuditServic
 			EntityID:   id,
 			EntityName: competitor.NameFirst + " " + competitor.NameLast,
 			Detail: map[string]any{
-				"studio":              competitor.Studio,
-				"teacher":             competitor.Teacher,
-				"lastRegisteredEvent": competitor.LastRegisteredEvent,
+				"studio":        competitor.Studio,
+				"teacher":       competitor.Teacher,
+				"registeredFor": competitor.RegisterForEvent,
 			},
 			IP: authmw.ClientIP(r),
 		})
