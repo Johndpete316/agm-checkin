@@ -405,9 +405,18 @@ func (s *CompetitorService) GetAll(search string, adminView bool, eventScope str
 
 	if search != "" {
 		like := "%" + search + "%"
+		// The three-way OR this replaced was redundant: name_first and name_last
+		// are both substrings of the concatenation, so any row matching either
+		// branch already matches the concatenated one. Collapsing to the single
+		// term is result-identical and halves the seq-scan cost on its own, but
+		// the reason it matters is that one expression can be indexed — the OR
+		// could not be, so every search was a full scan of competitors whatever
+		// indexes existed. This predicate is written to match the expression
+		// index in migration 004 exactly; changing either without the other
+		// silently drops the search back to a sequential scan.
 		query = query.Where(
-			"name_first ILIKE ? OR name_last ILIKE ? OR CONCAT(name_first, ' ', name_last) ILIKE ?",
-			like, like, like,
+			"COALESCE(name_first, '') || ' ' || COALESCE(name_last, '') ILIKE ?",
+			like,
 		).Order(clause.Expr{
 			SQL:  "CASE WHEN name_last ILIKE ? THEN 0 WHEN name_first ILIKE ? THEN 1 ELSE 2 END, name_last, name_first",
 			Vars: []interface{}{like, like},
