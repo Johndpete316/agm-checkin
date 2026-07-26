@@ -361,7 +361,18 @@ func (s *CompetitorService) currentEventID() string {
 	return event.ID
 }
 
-func (s *CompetitorService) GetAll(search string, adminView bool) ([]CompetitorWithCheckIn, error) {
+// Symbolic values accepted by GetAll's eventScope in place of a concrete event
+// ID. EventScopeCurrent lets a caller ask for the current roster without first
+// looking up which event is current, saving a round trip on page load.
+const (
+	EventScopeAll     = "all"
+	EventScopeCurrent = "current"
+)
+
+// GetAll lists competitors. eventScope selects the roster: a concrete event ID,
+// EventScopeCurrent, EventScopeAll, or "" for every competitor. Registration
+// users are always pinned to the current event whatever they ask for.
+func (s *CompetitorService) GetAll(search string, adminView bool, eventScope string) ([]CompetitorWithCheckIn, error) {
 	eventID := s.currentEventID()
 
 	query := s.db.Model(&db.Competitor{})
@@ -370,13 +381,25 @@ func (s *CompetitorService) GetAll(search string, adminView bool) ([]CompetitorW
 	// Registration is an attendance row, not a column on the competitor: a
 	// single text field cannot express being registered for two events at once,
 	// which is what forced a full re-import to open every new event.
-	if !adminView {
+	//
+	// Scoping to one roster is also what keeps the admin view cheap: unscoped it
+	// returns every competitor ever imported, which grows with each event while
+	// the roster anyone is actually working from stays the size of one event.
+	rosterEventID := ""
+	switch {
+	case !adminView, eventScope == EventScopeCurrent:
 		if eventID == "" {
 			return []CompetitorWithCheckIn{}, nil
 		}
+		rosterEventID = eventID
+	case eventScope != "" && eventScope != EventScopeAll:
+		rosterEventID = eventScope
+	}
+
+	if rosterEventID != "" {
 		query = query.Where(
 			"EXISTS (SELECT 1 FROM competitor_events ce WHERE ce.competitor_id = competitors.id AND ce.event_id = ?)",
-			eventID,
+			rosterEventID,
 		)
 	}
 
@@ -534,9 +557,17 @@ func (s *CompetitorService) CheckIn(id string, staffName string) (*CompetitorWit
 		CheckedInBy:     staffName,
 	}
 
+	// The first check-in wins. Stations run from a list fetched at open and never
+	// learn that another desk already processed someone, so duplicate check-ins are
+	// routine rather than exceptional. Guarding the update keeps the original
+	// timestamp and the name of the staff member who actually saw the competitor;
+	// without it the last duplicate silently rewrites the attendance record.
 	if err := s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "competitor_id"}, {Name: "event_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"checked_in", "check_in_datetime", "checked_in_by"}),
+		Where: clause.Where{Exprs: []clause.Expression{
+			clause.Eq{Column: clause.Column{Table: "competitor_events", Name: "checked_in"}, Value: false},
+		}},
 	}).Create(&ce).Error; err != nil {
 		return nil, err
 	}

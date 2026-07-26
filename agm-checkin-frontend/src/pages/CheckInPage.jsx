@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useDeferredValue } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue } from 'react'
 import Box from '@mui/material/Box'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
@@ -8,6 +8,20 @@ import CompetitorCard from '../components/CompetitorCard'
 import { getCompetitors, checkInCompetitor } from '../api/competitors'
 import { getCurrentEvent } from '../api/events'
 
+// How often to pull a fresh roster while the tab is open. Several desks check
+// people in at once, so a list held from open goes stale within minutes.
+const REFRESH_INTERVAL_MS = 30_000
+
+// Current-event competitors first, then alpha by last name.
+function sortCompetitors(competitors) {
+  return [...competitors].sort((a, b) => {
+    const aIn = a.currentCheckIn != null
+    const bIn = b.currentCheckIn != null
+    if (aIn !== bIn) return bIn ? 1 : -1
+    return a.nameLast.localeCompare(b.nameLast)
+  })
+}
+
 export default function CheckInPage() {
   const [search, setSearch] = useState('')
   const [allCompetitors, setAllCompetitors] = useState([])
@@ -15,19 +29,31 @@ export default function CheckInPage() {
   const [error, setError] = useState(null)
   const [checkingIn, setCheckingIn] = useState(null)
 
+  // A refresh landing mid-check-in would momentarily revert the card to Pending,
+  // since the server response we merged is newer than the list in flight.
+  const checkingInRef = useRef(null)
+  const refreshingRef = useRef(false)
+
+  const refresh = useCallback(async () => {
+    if (refreshingRef.current || checkingInRef.current) return
+    refreshingRef.current = true
+    try {
+      const competitors = await getCompetitors()
+      setAllCompetitors(sortCompetitors(competitors))
+    } catch {
+      // Background refresh — keep showing the roster we already have rather than
+      // surfacing an error over a working screen.
+    } finally {
+      refreshingRef.current = false
+    }
+  }, [])
+
   useEffect(() => {
     const prefetch = async () => {
       try {
         // Fire both in parallel; getCurrentEvent warms the cache for other pages.
         const [competitors] = await Promise.all([getCompetitors(), getCurrentEvent()])
-        // Current-event competitors first, then alpha by last name.
-        competitors.sort((a, b) => {
-          const aIn = a.currentCheckIn != null
-          const bIn = b.currentCheckIn != null
-          if (aIn !== bIn) return bIn ? 1 : -1
-          return a.nameLast.localeCompare(b.nameLast)
-        })
-        setAllCompetitors(competitors)
+        setAllCompetitors(sortCompetitors(competitors))
       } catch (err) {
         setError(err.message)
       } finally {
@@ -36,6 +62,22 @@ export default function CheckInPage() {
     }
     prefetch()
   }, [])
+
+  // Other desks' check-ins, and rosters changed by an admin or import, only
+  // reach this page through a refetch.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') refresh()
+    }, REFRESH_INTERVAL_MS)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      clearInterval(timer)
+    }
+  }, [refresh])
 
   const deferredSearch = useDeferredValue(search)
 
@@ -55,6 +97,7 @@ export default function CheckInPage() {
 
   const handleCheckIn = async (id) => {
     setCheckingIn(id)
+    checkingInRef.current = id
     try {
       const updated = await checkInCompetitor(id)
       setAllCompetitors(prev => prev.map(c => (c.id === id ? { ...c, ...updated } : c)))
@@ -62,6 +105,7 @@ export default function CheckInPage() {
       setError(err.message)
     } finally {
       setCheckingIn(null)
+      checkingInRef.current = null
     }
   }
 

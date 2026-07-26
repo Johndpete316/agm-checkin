@@ -16,9 +16,10 @@ import (
 func listCompetitors(svc *service.CompetitorService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		search := r.URL.Query().Get("search")
+		eventScope := r.URL.Query().Get("eventId")
 		staff := authmw.StaffFromContext(r.Context())
 		adminView := staff != nil && staff.Role == "admin"
-		competitors, err := svc.GetAll(search, adminView)
+		competitors, err := svc.GetAll(search, adminView, eventScope)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return

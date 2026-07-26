@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import EditIcon from '@mui/icons-material/Edit'
 import ViewColumnIcon from '@mui/icons-material/ViewColumn'
 import IconButton from '@mui/material/IconButton'
@@ -38,6 +38,8 @@ import {
   checkInCompetitor,
   updateCompetitorDOB,
   validateCompetitor,
+  EVENT_SCOPE_ALL,
+  EVENT_SCOPE_CURRENT,
 } from '../api/competitors'
 import { listEvents, getCurrentEvent } from '../api/events'
 import { useAuth } from '../context/AuthContext'
@@ -145,20 +147,28 @@ export default function CompetitorsPage() {
   const [visibleColumns, setVisibleColumns] = useState(loadVisibleColumns)
   const [columnsAnchor, setColumnsAnchor] = useState(null)
 
-  // Filters
+  // Filters. filterEvent is not one of these — it selects which roster the server
+  // sends rather than narrowing what is already loaded.
   const [searchText, setSearchText] = useState('')
-  const [filterEvent, setFilterEvent] = useState('')
   const [filterStudio, setFilterStudio] = useState('')
   const [filterTeacher, setFilterTeacher] = useState('')
   const [filterShirt, setFilterShirt] = useState('')
   const [filterValidated, setFilterValidated] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
 
-  const anyFilterActive = searchText || filterEvent || filterStudio || filterTeacher || filterShirt || filterValidated || filterStatus
+  // Starts on the current event so the first load fetches one roster instead of
+  // every competitor ever imported. The sentinel avoids waiting on getCurrentEvent
+  // to learn the ID, and is swapped for the real one once that resolves.
+  const [filterEvent, setFilterEvent] = useState(EVENT_SCOPE_CURRENT)
+
+  // The roster currently in state, so resolving the sentinel to the equivalent
+  // concrete event ID does not refetch what we already have.
+  const loadedScopeRef = useRef(EVENT_SCOPE_CURRENT)
+
+  const anyFilterActive = searchText || filterStudio || filterTeacher || filterShirt || filterValidated || filterStatus
 
   const clearFilters = () => {
     setSearchText('')
-    setFilterEvent('')
     setFilterStudio('')
     setFilterTeacher('')
     setFilterShirt('')
@@ -166,41 +176,67 @@ export default function CompetitorsPage() {
     setFilterStatus('')
   }
 
-  const fetchCompetitors = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  useEffect(() => {
+    let cancelled = false
 
-    // Fire all three in parallel so they overlap on the wire.
-    const competitorsPromise = getCompetitors()
-    const eventsPromise = listEvents()
-    const currentEventPromise = getCurrentEvent()
+    const load = async () => {
+      setLoading(true)
+      setError(null)
 
-    // Unblock the table as soon as competitor data arrives — don't wait for filter metadata.
-    try {
-      setCompetitors(await competitorsPromise)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+      // Fire all three in parallel so they overlap on the wire.
+      const competitorsPromise = getCompetitors('', EVENT_SCOPE_CURRENT)
+      const eventsPromise = listEvents()
+      const currentEventPromise = getCurrentEvent()
+
+      // Unblock the table as soon as competitor data arrives — don't wait for filter metadata.
+      try {
+        const data = await competitorsPromise
+        if (!cancelled) setCompetitors(data)
+      } catch (err) {
+        if (!cancelled) setError(err.message)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+
+      // Populate filter state when the secondary requests finish.
+      const [eventsResult, currentEventResult] = await Promise.allSettled([eventsPromise, currentEventPromise])
+      if (cancelled) return
+      if (eventsResult.status === 'fulfilled') setEvents(eventsResult.value)
+      if (currentEventResult.status === 'fulfilled' && currentEventResult.value?.id) {
+        loadedScopeRef.current = currentEventResult.value.id
+        setFilterEvent(currentEventResult.value.id)
+      }
     }
 
-    // Populate filter state when the secondary requests finish.
-    const [eventsResult, currentEventResult] = await Promise.allSettled([eventsPromise, currentEventPromise])
-    if (eventsResult.status === 'fulfilled') setEvents(eventsResult.value)
-    if (currentEventResult.status === 'fulfilled' && currentEventResult.value?.id) {
-      setFilterEvent(currentEventResult.value.id)
-    }
+    load()
+    return () => { cancelled = true }
   }, [])
 
+  // Changing the event selector pulls that roster from the server.
   useEffect(() => {
-    fetchCompetitors()
-  }, [fetchCompetitors])
+    if (filterEvent === loadedScopeRef.current) return
+    loadedScopeRef.current = filterEvent
 
-  // Events present in the loaded competitor data, ordered by start_date from the API
-  const availableEvents = useMemo(() => {
-    const found = new Set(competitors.map(c => c.mostRecentEvent).filter(Boolean))
-    return events.filter(e => found.has(e.id)).reverse()
-  }, [competitors, events])
+    let cancelled = false
+    const load = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const data = await getCompetitors('', filterEvent)
+        if (!cancelled) setCompetitors(data)
+      } catch (err) {
+        if (!cancelled) setError(err.message)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [filterEvent])
+
+  // Every event is selectable, not just those present in the loaded roster —
+  // the roster now holds one event, so it can no longer imply the list.
+  const availableEvents = useMemo(() => [...events].reverse(), [events])
 
   // Unique studios, teachers, shirt sizes derived from loaded data
   const uniqueStudios = useMemo(() => {
@@ -303,7 +339,7 @@ export default function CompetitorsPage() {
         (c.shirtSize || '').toLowerCase().includes(q)
       )
     }
-    if (filterEvent)   list = list.filter(c => c.mostRecentEvent === filterEvent)
+    // No event filter here — the server already scoped the roster to filterEvent.
     if (filterStudio)  list = list.filter(c => c.studio === filterStudio)
     if (filterTeacher) list = list.filter(c => c.teacher === filterTeacher)
     if (filterShirt)   list = list.filter(c => c.shirtSize === filterShirt)
@@ -313,7 +349,7 @@ export default function CompetitorsPage() {
     if (filterStatus === 'pending')   list = list.filter(c => !c.currentCheckIn?.checkedIn)
 
     return list
-  }, [competitors, order, orderBy, searchText, filterEvent, filterStudio, filterTeacher, filterShirt, filterValidated, filterStatus])
+  }, [competitors, order, orderBy, searchText, filterStudio, filterTeacher, filterShirt, filterValidated, filterStatus])
 
   const vis = (key) => visibleColumns.has(key)
 
@@ -350,7 +386,9 @@ export default function CompetitorsPage() {
               sx={{ minWidth: 220, flex: 1 }}
             />
 
-            {availableEvents.length > 1 && (
+            {/* Hidden until the sentinel resolves to a real event ID — until then
+                there is no honest label for what the table is showing. */}
+            {isAdmin && filterEvent !== EVENT_SCOPE_CURRENT && availableEvents.length > 1 && (
               <FormControl size="small" sx={{ minWidth: 120 }}>
                 <InputLabel>Event</InputLabel>
                 <Select
@@ -358,7 +396,7 @@ export default function CompetitorsPage() {
                   label="Event"
                   onChange={e => setFilterEvent(e.target.value)}
                 >
-                  <MenuItem value=""><em>All</em></MenuItem>
+                  <MenuItem value={EVENT_SCOPE_ALL}><em>All</em></MenuItem>
                   {availableEvents.map(e => (
                     <MenuItem key={e.id} value={e.id}>{e.name}</MenuItem>
                   ))}

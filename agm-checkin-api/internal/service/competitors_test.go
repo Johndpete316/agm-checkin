@@ -102,7 +102,7 @@ func TestGetAllScopesRegistrationUsersToCurrentEvent(t *testing.T) {
 	register(t, database, onRoster.ID, "nat-2026")
 	register(t, database, pastOnly.ID, "glr-2026")
 
-	got, err := svc.GetAll("", false)
+	got, err := svc.GetAll("", false, "")
 	if err != nil {
 		t.Fatalf("GetAll(registration): %v", err)
 	}
@@ -111,13 +111,84 @@ func TestGetAllScopesRegistrationUsersToCurrentEvent(t *testing.T) {
 		t.Errorf("registration user should see only the current roster, got %v", found)
 	}
 
-	got, err = svc.GetAll("", true)
+	got, err = svc.GetAll("", true, "")
 	if err != nil {
 		t.Fatalf("GetAll(admin): %v", err)
 	}
 	found = names(got)
 	if !found["Lovelace"] || !found["Hopper"] {
 		t.Errorf("admin should see every competitor, got %v", found)
+	}
+}
+
+// The admin event selector scopes the query server-side so the page loads one
+// roster instead of every competitor ever imported.
+func TestGetAllScopesAdminsToTheRequestedEvent(t *testing.T) {
+	database, svc := newFixture(t)
+
+	seedEventOn(t, database, "glr-2026", false, time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC))
+	seedEventOn(t, database, "nat-2026", true, time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC))
+
+	returning := seedCompetitor(t, database, "Ada", "Lovelace")
+	pastOnly := seedCompetitor(t, database, "Grace", "Hopper")
+	currentOnly := seedCompetitor(t, database, "Alan", "Turing")
+	register(t, database, returning.ID, "glr-2026")
+	register(t, database, returning.ID, "nat-2026")
+	register(t, database, pastOnly.ID, "glr-2026")
+	register(t, database, currentOnly.ID, "nat-2026")
+
+	// A past event returns its whole roster, including someone who has since
+	// competed again. Filtering on most-recent-event would have dropped Lovelace.
+	got, err := svc.GetAll("", true, "glr-2026")
+	if err != nil {
+		t.Fatalf("GetAll(admin, glr-2026): %v", err)
+	}
+	found := names(got)
+	if !found["Lovelace"] || !found["Hopper"] || found["Turing"] {
+		t.Errorf("glr-2026 roster = %v, want Lovelace and Hopper only", found)
+	}
+
+	// The "current" sentinel resolves without the caller knowing the event ID.
+	got, err = svc.GetAll("", true, EventScopeCurrent)
+	if err != nil {
+		t.Fatalf("GetAll(admin, current): %v", err)
+	}
+	found = names(got)
+	if !found["Lovelace"] || !found["Turing"] || found["Hopper"] {
+		t.Errorf("current roster = %v, want Lovelace and Turing only", found)
+	}
+
+	got, err = svc.GetAll("", true, EventScopeAll)
+	if err != nil {
+		t.Fatalf("GetAll(admin, all): %v", err)
+	}
+	if len(names(got)) != 3 {
+		t.Errorf("EventScopeAll should return every competitor, got %v", names(got))
+	}
+}
+
+// Scope is an admin affordance. A registration user asking for a past roster
+// must still get the current one rather than a back door into history.
+func TestGetAllIgnoresEventScopeForRegistrationUsers(t *testing.T) {
+	database, svc := newFixture(t)
+
+	seedEvent(t, database, "glr-2026", false)
+	seedEvent(t, database, "nat-2026", true)
+
+	pastOnly := seedCompetitor(t, database, "Grace", "Hopper")
+	currentOnly := seedCompetitor(t, database, "Alan", "Turing")
+	register(t, database, pastOnly.ID, "glr-2026")
+	register(t, database, currentOnly.ID, "nat-2026")
+
+	for _, scope := range []string{"glr-2026", EventScopeAll} {
+		got, err := svc.GetAll("", false, scope)
+		if err != nil {
+			t.Fatalf("GetAll(registration, %q): %v", scope, err)
+		}
+		found := names(got)
+		if found["Hopper"] || !found["Turing"] {
+			t.Errorf("scope %q leaked past the registration filter: %v", scope, found)
+		}
 	}
 }
 
@@ -135,7 +206,7 @@ func TestReturningCompetitorIsVisibleForEveryEventTheyAreOn(t *testing.T) {
 	register(t, database, returning.ID, "glr-2026")
 	register(t, database, returning.ID, "nat-2026")
 
-	got, err := svc.GetAll("", false)
+	got, err := svc.GetAll("", false, "")
 	if err != nil {
 		t.Fatalf("GetAll(registration): %v", err)
 	}
@@ -179,7 +250,7 @@ func TestCreateRegistersForSelectedEvent(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	got, err := svc.GetAll("", false)
+	got, err := svc.GetAll("", false, "")
 	if err != nil {
 		t.Fatalf("GetAll(registration): %v", err)
 	}
@@ -219,6 +290,7 @@ func TestCheckInIsIdempotent(t *testing.T) {
 		t.Error("expected a check-in timestamp")
 	}
 
+	// A second desk working from a stale roster re-checks the same competitor in.
 	second, err := svc.CheckIn(c.ID, "Other Staff")
 	if err != nil {
 		t.Fatalf("second CheckIn: %v", err)
@@ -226,6 +298,46 @@ func TestCheckInIsIdempotent(t *testing.T) {
 	if second.CurrentCheckIn.ID != first.CurrentCheckIn.ID {
 		t.Errorf("check-in created a second row: %s then %s",
 			first.CurrentCheckIn.ID, second.CurrentCheckIn.ID)
+	}
+
+	// The duplicate must not rewrite who checked them in, or when.
+	if second.CurrentCheckIn.CheckedInBy != "Staff Member" {
+		t.Errorf("duplicate check-in overwrote attribution: CheckedInBy = %q, want %q",
+			second.CurrentCheckIn.CheckedInBy, "Staff Member")
+	}
+	if !second.CurrentCheckIn.CheckInDatetime.Equal(*first.CurrentCheckIn.CheckInDatetime) {
+		t.Errorf("duplicate check-in overwrote the timestamp: %v then %v",
+			first.CurrentCheckIn.CheckInDatetime, second.CurrentCheckIn.CheckInDatetime)
+	}
+
+	var rows int64
+	database.Model(&db.CompetitorEvent{}).Where("competitor_id = ?", c.ID).Count(&rows)
+	if rows != 1 {
+		t.Errorf("expected exactly 1 attendance row, got %d", rows)
+	}
+}
+
+// A competitor already on the roster but not yet checked in must still be
+// updated by the conflict path — the guard applies only to real check-ins.
+func TestCheckInUpdatesAnUncheckedRosterRow(t *testing.T) {
+	database, svc := newFixture(t)
+
+	seedEvent(t, database, "nat-2026", true)
+	c := seedCompetitor(t, database, "Grace", "Hopper")
+	register(t, database, c.ID, "nat-2026")
+
+	result, err := svc.CheckIn(c.ID, "Staff Member")
+	if err != nil {
+		t.Fatalf("CheckIn: %v", err)
+	}
+	if !result.CurrentCheckIn.CheckedIn {
+		t.Error("expected the existing roster row to be marked checked in")
+	}
+	if result.CurrentCheckIn.CheckedInBy != "Staff Member" {
+		t.Errorf("CheckedInBy = %q, want %q", result.CurrentCheckIn.CheckedInBy, "Staff Member")
+	}
+	if result.CurrentCheckIn.CheckInDatetime == nil {
+		t.Error("expected a check-in timestamp on the roster row")
 	}
 
 	var rows int64
