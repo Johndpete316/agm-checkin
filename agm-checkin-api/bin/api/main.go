@@ -79,17 +79,11 @@ func main() {
 	r.Use(authmw.IPBlocklist(authSvc))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		// Finding 11: expose the trusted-proxy mode in the health response so
-		// operators and monitoring tools can verify the security configuration
-		// without having access to server logs.  If this endpoint is directly
-		// reachable from the internet without going through a Cloudflare Tunnel,
-		// the trustedProxy value shows whether IP spoofing is possible.
 		respondJSON(w, http.StatusOK, map[string]string{
-			"status":       "ok",
-			"trustedProxy": string(trustedProxy),
+			"status": "ok",
 		})
 	})
-	r.Post("/api/auth/token", createToken(authSvc))
+	r.Post("/api/auth/token", createToken(authSvc, auditSvc))
 
 	r.Group(func(r chi.Router) {
 		r.Use(authmw.RequireToken(authSvc))

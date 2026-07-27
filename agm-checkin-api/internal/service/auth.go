@@ -64,7 +64,6 @@ func (s *AuthService) VerifyPINAndCreateToken(ip, pin, firstName, lastName strin
 			return err
 		}
 
-		// Guard: shouldn't reach here if already at limit, but enforce defensively.
 		if attemptCount >= maxPINAttempts {
 			blockIPTx(tx, ip)
 			authErr = ErrIPBlocked

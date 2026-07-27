@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -13,7 +14,7 @@ import (
 	"johndpete316/agm-checkin-api/internal/service"
 )
 
-func createToken(authSvc *service.AuthService) http.HandlerFunc {
+func createToken(authSvc *service.AuthService, auditSvc *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Code      string `json:"code"`
@@ -32,10 +33,27 @@ func createToken(authSvc *service.AuthService) http.HandlerFunc {
 		ip := authmw.ClientIP(r)
 		token, err := authSvc.VerifyPINAndCreateToken(ip, req.Code, req.FirstName, req.LastName)
 		if err != nil {
+			fullName := fmt.Sprintf("%s %s", req.FirstName, req.LastName)
 			switch {
 			case errors.Is(err, service.ErrIPBlocked):
+				auditSvc.Log(service.LogEntry{
+					ActorID:    "auth_handler",
+					ActorName:  "system",
+					Action:     "auth.block_ip",
+					EntityType: "ip_address",
+					EntityName: fullName,
+					IP:         ip,
+				})
 				respondJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
 			case errors.Is(err, service.ErrTooManyAttempts):
+				auditSvc.Log(service.LogEntry{
+					ActorID:    "auth_handler",
+					ActorName:  "system",
+					Action:     "auth.block_ip",
+					EntityType: "ip_address",
+					EntityName: fullName,
+					IP:         ip,
+				})
 				respondJSON(w, http.StatusForbidden, map[string]string{"error": "too many failed attempts"})
 			case errors.Is(err, service.ErrInvalidPIN):
 				respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -44,6 +62,17 @@ func createToken(authSvc *service.AuthService) http.HandlerFunc {
 			}
 			return
 		}
+
+		fullName := fmt.Sprintf("%s %s", token.FirstName, token.LastName)
+		auditSvc.Log(service.LogEntry{
+			ActorID:    "auth_hanlder",
+			ActorName:  "system",
+			Action:     "auth.create_token",
+			EntityType: "staff_token",
+			EntityID:   token.ID,
+			EntityName: fullName,
+			IP:         ip,
+		})
 
 		respondJSON(w, http.StatusCreated, map[string]string{
 			"token":     token.Token,
