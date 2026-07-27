@@ -32,3 +32,12 @@ pgadmin:
 cloudflared:
   replicaCount: 2
   tunnelToken: ""  # use values.secret.yaml
+
+# Syncs the ip_blocklists table into a Cloudflare Access policy so blocked IPs
+# are rejected at the edge. Runs /app/cf-sync from the API image on a CronJob.
+cfSync:
+  enabled: true
+  schedule: "*/1 * * * *"
+  accountId: ""   # override in values.secret.yaml
+  policyId: ""    # override in values.secret.yaml
+  apiToken: ""    # use values.secret.yaml

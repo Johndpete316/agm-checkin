@@ -1,0 +1,65 @@
+{{/*
+Mirrors the ip_blocklists table into a Cloudflare Access policy so blocked IPs
+are turned away at the edge rather than after crossing the tunnel. Runs from the
+same image as the API — /app/cf-sync is a third binary alongside /app/migrate,
+so there is no separate image to build or import to the nodes.
+*/}}
+{{- if .Values.cfSync.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-cf-sync
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+    app: agm-cf-sync
+spec:
+  schedule: {{ .Values.cfSync.schedule | quote }}
+  # A run takes seconds; overlapping runs would race on the same policy.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # If the controller is down past a whole interval, skip rather than pile up.
+  startingDeadlineSeconds: 60
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: agm-cf-sync
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: cf-sync
+              image: {{ .Values.api.image }}:{{ .Values.api.tag }}
+              imagePullPolicy: {{ .Values.imagePullPolicy }}
+              command: ["/app/cf-sync"]
+              env:
+                - name: DATABASE_URL
+                  value: "host={{ .Release.Name }}-postgres user={{ .Values.postgres.user }} password={{ .Values.postgres.password }} dbname={{ .Values.postgres.db }} port=5432 sslmode=disable"
+                - name: CF_ACCOUNT_ID
+                  value: {{ .Values.cfSync.accountId | quote }}
+                - name: CF_POLICY_ID
+                  value: {{ .Values.cfSync.policyId | quote }}
+                - name: CF_API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Release.Name }}-cf-sync-secret
+                      key: apiToken
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-cf-sync-secret
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  apiToken: {{ .Values.cfSync.apiToken | quote }}
+{{- end }}
