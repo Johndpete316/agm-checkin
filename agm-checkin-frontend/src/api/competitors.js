@@ -120,6 +120,33 @@ export async function getCompetitorSchedule(id, eventId) {
   return res.json()
 }
 
+export async function createCompetitorScheduleEntry(competitorId, data) {
+  const res = await apiFetch(`${BASE_URL}/api/competitors/${competitorId}/schedule`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Failed to create schedule entry')
+  return res.json()
+}
+
+export async function updateCompetitorScheduleEntry(id, data) {
+  const res = await apiFetch(`${BASE_URL}/api/schedule/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Failed to update schedule entry')
+  return res.json()
+}
+
+export async function deleteCompetitorScheduleEntry(id) {
+  const res = await apiFetch(`${BASE_URL}/api/schedule/${id}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error('Failed to delete schedule entry')
+}
+
 export async function importCompetitors(file) {
   const form = new FormData()
   form.append('file', file)

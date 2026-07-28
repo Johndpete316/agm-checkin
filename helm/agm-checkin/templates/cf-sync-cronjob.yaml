@@ -35,8 +35,7 @@ spec:
               imagePullPolicy: {{ .Values.imagePullPolicy }}
               command: ["/app/cf-sync"]
               env:
-                - name: DATABASE_URL
-                  value: "host={{ .Release.Name }}-postgres user={{ .Values.postgres.user }} password={{ .Values.postgres.password }} dbname={{ .Values.postgres.db }} port=5432 sslmode=disable"
+                {{- include "agm-checkin.databaseUrlEnv" . | nindent 16 }}
                 - name: CF_ACCOUNT_ID
                   value: {{ .Values.cfSync.accountId | quote }}
                 - name: CF_POLICY_ID

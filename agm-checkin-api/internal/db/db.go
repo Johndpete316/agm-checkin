@@ -85,6 +85,7 @@ type CompetitorSchedule struct {
 	Room         string    `json:"room"`
 	Category     string    `gorm:"not null" json:"category"`
 	Division     string    `gorm:"not null" json:"division"`
+	PageNumber   string    `json:"pageNumber"`
 	SortOrder    int       `gorm:"not null;default:0" json:"sortOrder"`
 }
 
@@ -109,8 +110,11 @@ type AuditLog struct {
 	CreatedAt  time.Time `gorm:"index" json:"createdAt"`
 }
 
-func AutoMigrate(database *gorm.DB) {
-	database.AutoMigrate(
+// autoMigrate creates or widens whatever the models describe. It is deliberately
+// unexported: run concurrently by two API replicas it races on CREATE TABLE, so
+// every caller has to come through Setup, which holds the migration lock.
+func autoMigrate(database *gorm.DB) error {
+	return database.AutoMigrate(
 		&Competitor{},
 		&Event{},
 		&CompetitorEvent{},

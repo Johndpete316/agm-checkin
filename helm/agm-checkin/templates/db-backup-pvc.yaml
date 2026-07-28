@@ -1,0 +1,14 @@
+{{- if and .Values.dbBackup.enabled (not .Values.dbBackup.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agm-checkin.dbBackupPvcName" . }}
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.dbBackup.storageClass | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.dbBackup.storageSize }}
+{{- end }}

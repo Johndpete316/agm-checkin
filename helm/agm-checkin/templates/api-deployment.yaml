@@ -23,8 +23,7 @@ spec:
           ports:
             - containerPort: 8080
           env:
-            - name: DATABASE_URL
-              value: "host={{ .Release.Name }}-postgres user={{ .Values.postgres.user }} password={{ .Values.postgres.password }} dbname={{ .Values.postgres.db }} port=5432 sslmode=disable"
+            {{- include "agm-checkin.databaseUrlEnv" . | nindent 12 }}
             - name: ALLOWED_ORIGIN
               value: {{ .Values.api.allowedOrigin | quote }}
             - name: AUTH_PIN

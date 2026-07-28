@@ -10,6 +10,30 @@ api:
   trustedProxy: "cloudflare"  # "cloudflare" (production via CF Tunnel) or "direct" (local dev, no proxy)
   authPin: ""  # Do not put the real PIN here — use values.secret.yaml instead
 
+# Pre-upgrade schema migration job (templates/migrate-job.yaml).
+migrate:
+  # Hard ceiling on the job, retries included. Raise it if a future migration
+  # rewrites a large table; the current set is a few DDL statements.
+  timeoutSeconds: 600
+
+# Optional pre-upgrade DB dump stage. Disabled by default and meant to be
+# turned on per deploy (for risky changes) via --set dbBackup.enabled=true.
+dbBackup:
+  enabled: false
+  existingClaim: ""           # if set, chart will use this PVC and skip creating one
+  storageClass: local-path
+  storageSize: 10Gi
+  retention: 20               # keep newest N dumps in the PVC
+  timeoutSeconds: 900
+  filePrefix: predeploy
+
+# Optional Helm-driven restore. Keep disabled unless intentionally restoring.
+# This is a sharp tool: it drops and recreates the DB from one backup file.
+dbRestore:
+  enabled: false
+  backupFile: ""              # file must exist in the backup PVC
+  timeoutSeconds: 1800
+
 frontend:
   replicaCount: 2
   image: agm-frontend

@@ -111,7 +111,9 @@ func main() {
 		log.Fatal("DATABASE_URL environment variable is required")
 	}
 	database := db.Connect(dsn)
-	db.AutoMigrate(database)
+	if err := db.Setup(database); err != nil {
+		log.Fatal("database setup failed:", err)
+	}
 	database.Where("1 = 1").Delete(&db.Competitor{})
 
 	// Roster rows carry a foreign key to events, so the events have to exist first.

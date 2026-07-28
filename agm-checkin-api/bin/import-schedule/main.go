@@ -41,7 +41,9 @@ func main() {
 	}
 
 	database := db.Connect(dsn)
-	db.AutoMigrate(database)
+	if err := db.Setup(database); err != nil {
+		log.Fatalf("database setup failed: %v", err)
+	}
 
 	f, err := os.Open(flag.Arg(0))
 	if err != nil {
@@ -176,6 +178,7 @@ func parseScheduleCSV(r io.Reader, eventID string, byName map[string]string) ([]
 				Room:         col(row, "room"),
 				Category:     category,
 				Division:     col(row, "division"),
+				PageNumber:   col(row, "page_number"),
 				SortOrder:    sortOrder,
 			})
 		}

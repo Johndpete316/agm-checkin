@@ -336,6 +336,7 @@ type CompetitorWithCheckIn struct {
 	// than stored, so it cannot drift from the attendance rows the way
 	// LastRegisteredEvent did.
 	MostRecentEvent string `json:"mostRecentEvent"`
+	PageNumber      string `json:"pageNumber"`
 }
 
 // CompetitorEventWithEvent is used for the per-competitor history endpoint.
@@ -446,12 +447,25 @@ func (s *CompetitorService) GetAll(search string, adminView bool, eventScope str
 		return nil, err
 	}
 
+	pageMap := map[string]string{}
+	pageEventID := rosterEventID
+	if pageEventID == "" {
+		pageEventID = eventID
+	}
+	if pageEventID != "" {
+		pageMap, err = s.pageNumbersForEvent(ids, pageEventID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	result := make([]CompetitorWithCheckIn, len(competitors))
 	for i, c := range competitors {
 		result[i] = CompetitorWithCheckIn{
 			Competitor:      c,
 			CurrentCheckIn:  checkInMap[c.ID],
 			MostRecentEvent: recentMap[c.ID],
+			PageNumber:      pageMap[c.ID],
 		}
 	}
 	return result, nil
@@ -484,6 +498,35 @@ func (s *CompetitorService) mostRecentEvents(competitorIDs []string) (map[string
 	return out, nil
 }
 
+func (s *CompetitorService) pageNumbersForEvent(competitorIDs []string, eventID string) (map[string]string, error) {
+	if len(competitorIDs) == 0 || eventID == "" {
+		return map[string]string{}, nil
+	}
+
+	var rows []struct {
+		CompetitorID string
+		PageNumber   string
+	}
+	if err := s.db.Raw(`
+		SELECT
+			competitor_id,
+			STRING_AGG(page_number, ', ' ORDER BY schedule_date, sort_order, id) AS page_number
+		FROM competitor_schedules
+		WHERE competitor_id IN ?
+		  AND event_id = ?
+		  AND page_number <> ''
+		GROUP BY competitor_id
+	`, competitorIDs, eventID).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("resolving competitor page numbers: %w", err)
+	}
+
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[r.CompetitorID] = r.PageNumber
+	}
+	return out, nil
+}
+
 func (s *CompetitorService) GetByID(id string) (*CompetitorWithCheckIn, error) {
 	var competitor db.Competitor
 	if err := s.db.First(&competitor, "id = ?", id).Error; err != nil {
@@ -505,6 +548,14 @@ func (s *CompetitorService) GetByID(id string) (*CompetitorWithCheckIn, error) {
 		return nil, err
 	}
 	result.MostRecentEvent = recentMap[competitor.ID]
+
+	if eventID != "" {
+		pageMap, err := s.pageNumbersForEvent([]string{competitor.ID}, eventID)
+		if err != nil {
+			return nil, err
+		}
+		result.PageNumber = pageMap[competitor.ID]
+	}
 	return result, nil
 }
 
@@ -585,10 +636,16 @@ func (s *CompetitorService) CheckIn(id string, staffName string) (*CompetitorWit
 		return nil, err
 	}
 
+	pageMap, err := s.pageNumbersForEvent([]string{id}, eventID)
+	if err != nil {
+		return nil, err
+	}
+
 	return &CompetitorWithCheckIn{
 		Competitor:      competitor,
 		CurrentCheckIn:  &ce,
 		MostRecentEvent: recentMap[id],
+		PageNumber:      pageMap[id],
 	}, nil
 }
 

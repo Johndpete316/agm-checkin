@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import EditIcon from '@mui/icons-material/Edit'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import ViewColumnIcon from '@mui/icons-material/ViewColumn'
-import IconButton from '@mui/material/IconButton'
+import FilterListIcon from '@mui/icons-material/FilterList'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import Table from '@mui/material/Table'
@@ -16,10 +15,6 @@ import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Alert from '@mui/material/Alert'
-import Dialog from '@mui/material/Dialog'
-import DialogTitle from '@mui/material/DialogTitle'
-import DialogContent from '@mui/material/DialogContent'
-import DialogActions from '@mui/material/DialogActions'
 import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Divider from '@mui/material/Divider'
@@ -35,16 +30,13 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import {
   getCompetitors,
-  checkInCompetitor,
-  updateCompetitorDOB,
-  validateCompetitor,
   EVENT_SCOPE_ALL,
   EVENT_SCOPE_CURRENT,
 } from '../api/competitors'
 import { listEvents, getCurrentEvent } from '../api/events'
 import { useAuth } from '../context/AuthContext'
-import EditCompetitorDialog from '../components/EditCompetitorDialog'
 import AddCompetitorDialog from '../components/AddCompetitorDialog'
+import CompetitorDetailDialog from '../components/CompetitorDetailDialog'
 
 // Preferred shirt size order
 const SHIRT_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
@@ -54,6 +46,7 @@ const SHIRT_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
 const COLUMNS = [
   { key: 'name',        sort: 'nameLast',           label: 'Name' },
   { key: 'event',       sort: 'mostRecentEvent',     label: 'Event' },
+  { key: 'page',        sort: 'pageNumber',          label: 'Page' },
   { key: 'studio',      sort: 'studio',              label: 'Studio' },
   { key: 'teacher',     sort: 'teacher',             label: 'Teacher' },
   { key: 'shirt',       sort: 'shirtSize',           label: 'Shirt' },
@@ -75,7 +68,17 @@ function loadVisibleColumns() {
     const stored = localStorage.getItem('agm_competitors_columns')
     if (stored) {
       const arr = JSON.parse(stored)
-      if (Array.isArray(arr) && arr.length > 0) return new Set(arr)
+      if (Array.isArray(arr) && arr.length > 0) {
+        const known = new Set(COLUMNS.map(c => c.key))
+        const filtered = arr.filter(key => known.has(key))
+        const migratedFlag = localStorage.getItem('agm_competitors_columns_page_migrated_v1')
+        if (!migratedFlag && !filtered.includes('page')) {
+          filtered.push('page')
+          localStorage.setItem('agm_competitors_columns', JSON.stringify(filtered))
+          localStorage.setItem('agm_competitors_columns_page_migrated_v1', '1')
+        }
+        return new Set(filtered)
+      }
     }
   } catch {}
   return new Set(DEFAULT_VISIBLE_KEYS)
@@ -117,16 +120,6 @@ function formatDOB(dob) {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
-function toInputDate(dob) {
-  if (!dob) return ''
-  const d = new Date(dob)
-  if (isNaN(d.getTime()) || d.getFullYear() < 1900) return ''
-  const y = d.getUTCFullYear()
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(d.getUTCDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
 export default function CompetitorsPage() {
   const { isAdmin } = useAuth()
   const [competitors, setCompetitors] = useState([])
@@ -135,17 +128,13 @@ export default function CompetitorsPage() {
   const [error, setError] = useState(null)
   const [order, setOrder] = useState('asc')
   const [orderBy, setOrderBy] = useState('nameLast')
-  const [checkingIn, setCheckingIn] = useState(null)
-  const [validateTarget, setValidateTarget] = useState(null)
-  const [editedDOB, setEditedDOB] = useState('')
-  const [confirming, setConfirming] = useState(false)
-  const [dialogError, setDialogError] = useState('')
-  const [editTarget, setEditTarget] = useState(null)
+  const [selectedCompetitorID, setSelectedCompetitorID] = useState(null)
   const [addOpen, setAddOpen] = useState(false)
 
   // Column visibility — persisted in localStorage
   const [visibleColumns, setVisibleColumns] = useState(loadVisibleColumns)
   const [columnsAnchor, setColumnsAnchor] = useState(null)
+  const [filtersAnchor, setFiltersAnchor] = useState(null)
 
   // Filters. filterEvent is not one of these — it selects which roster the server
   // sends rather than narrowing what is already loaded.
@@ -166,6 +155,9 @@ export default function CompetitorsPage() {
   const loadedScopeRef = useRef(EVENT_SCOPE_CURRENT)
 
   const anyFilterActive = searchText || filterStudio || filterTeacher || filterShirt || filterValidated || filterStatus
+  const activeFilterCount = [searchText, filterStudio, filterTeacher, filterShirt, filterValidated, filterStatus]
+    .filter(Boolean)
+    .length
 
   const clearFilters = () => {
     setSearchText('')
@@ -282,50 +274,6 @@ export default function CompetitorsPage() {
 
   const isCheckedIn = (competitor) => !!competitor.currentCheckIn?.checkedIn
 
-  const handleCheckInClick = (competitor) => {
-    if (!competitor.dobVerifiedAt) {
-      setEditedDOB(toInputDate(competitor.dateOfBirth))
-      setDialogError('')
-      setValidateTarget(competitor)
-    } else {
-      doCheckIn(competitor.id)
-    }
-  }
-
-  const doCheckIn = async (id) => {
-    setCheckingIn(id)
-    try {
-      const updated = await checkInCompetitor(id)
-      updateLocalCompetitor(updated)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setCheckingIn(null)
-    }
-  }
-
-  const handleConfirm = async () => {
-    if (!validateTarget) return
-    setConfirming(true)
-    setDialogError('')
-    try {
-      const originalDOB = toInputDate(validateTarget.dateOfBirth)
-      if (editedDOB && editedDOB !== originalDOB) {
-        const updated = await updateCompetitorDOB(validateTarget.id, editedDOB)
-        updateLocalCompetitor(updated)
-      }
-      const validated = await validateCompetitor(validateTarget.id)
-      updateLocalCompetitor(validated)
-      const id = validateTarget.id
-      setValidateTarget(null)
-      doCheckIn(id)
-    } catch {
-      setDialogError('Failed to save. Please try again.')
-    } finally {
-      setConfirming(false)
-    }
-  }
-
   const displayed = useMemo(() => {
     let list = [...competitors].sort(getComparator(order, orderBy))
 
@@ -350,6 +298,11 @@ export default function CompetitorsPage() {
 
     return list
   }, [competitors, order, orderBy, searchText, filterStudio, filterTeacher, filterShirt, filterValidated, filterStatus])
+
+  const selectedCompetitor = useMemo(
+    () => competitors.find(c => c.id === selectedCompetitorID) || null,
+    [competitors, selectedCompetitorID]
+  )
 
   const vis = (key) => visibleColumns.has(key)
 
@@ -376,7 +329,7 @@ export default function CompetitorsPage() {
         </Box>
       ) : (
         <>
-          {/* Filter bar */}
+          {/* Search + controls */}
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', mb: 1 }}>
             <TextField
               size="small"
@@ -386,97 +339,14 @@ export default function CompetitorsPage() {
               sx={{ minWidth: 220, flex: 1 }}
             />
 
-            {/* Hidden until the sentinel resolves to a real event ID — until then
-                there is no honest label for what the table is showing. */}
-            {isAdmin && filterEvent !== EVENT_SCOPE_CURRENT && availableEvents.length > 1 && (
-              <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel>Event</InputLabel>
-                <Select
-                  value={filterEvent}
-                  label="Event"
-                  onChange={e => setFilterEvent(e.target.value)}
-                >
-                  <MenuItem value={EVENT_SCOPE_ALL}><em>All</em></MenuItem>
-                  {availableEvents.map(e => (
-                    <MenuItem key={e.id} value={e.id}>{e.name}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            )}
-
-            <FormControl size="small" sx={{ minWidth: 130 }}>
-              <InputLabel>Studio</InputLabel>
-              <Select
-                value={filterStudio}
-                label="Studio"
-                onChange={e => setFilterStudio(e.target.value)}
-              >
-                <MenuItem value=""><em>All</em></MenuItem>
-                {uniqueStudios.map(s => (
-                  <MenuItem key={s} value={s}>{s}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl size="small" sx={{ minWidth: 130 }}>
-              <InputLabel>Teacher</InputLabel>
-              <Select
-                value={filterTeacher}
-                label="Teacher"
-                onChange={e => setFilterTeacher(e.target.value)}
-              >
-                <MenuItem value=""><em>All</em></MenuItem>
-                {uniqueTeachers.map(t => (
-                  <MenuItem key={t} value={t}>{t}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl size="small" sx={{ minWidth: 90 }}>
-              <InputLabel>Shirt</InputLabel>
-              <Select
-                value={filterShirt}
-                label="Shirt"
-                onChange={e => setFilterShirt(e.target.value)}
-              >
-                <MenuItem value=""><em>All</em></MenuItem>
-                {uniqueShirts.map(s => (
-                  <MenuItem key={s} value={s}>{s}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl size="small" sx={{ minWidth: 140 }}>
-              <InputLabel>Validated</InputLabel>
-              <Select
-                value={filterValidated}
-                label="Validated"
-                onChange={e => setFilterValidated(e.target.value)}
-              >
-                <MenuItem value=""><em>All</em></MenuItem>
-                <MenuItem value="yes">Validated</MenuItem>
-                <MenuItem value="needs">Needs Validation</MenuItem>
-              </Select>
-            </FormControl>
-
-            <FormControl size="small" sx={{ minWidth: 120 }}>
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={filterStatus}
-                label="Status"
-                onChange={e => setFilterStatus(e.target.value)}
-              >
-                <MenuItem value=""><em>All</em></MenuItem>
-                <MenuItem value="checkedin">Checked In</MenuItem>
-                <MenuItem value="pending">Pending</MenuItem>
-              </Select>
-            </FormControl>
-
-            {anyFilterActive && (
-              <Button size="small" onClick={clearFilters}>
-                Clear
-              </Button>
-            )}
+            <Button
+              size="small"
+              variant={anyFilterActive ? 'contained' : 'outlined'}
+              startIcon={<FilterListIcon />}
+              onClick={e => setFiltersAnchor(e.currentTarget)}
+            >
+              Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+            </Button>
 
             <Box sx={{ ml: 'auto', display: { xs: 'none', md: 'block' } }}>
               <Button
@@ -496,13 +366,48 @@ export default function CompetitorsPage() {
             </Typography>
           )}
 
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ display: { xs: 'none', md: 'block' }, mb: 1 }}
+          >
+            Click any row to open details and actions.
+          </Typography>
+
           {/* Mobile card list */}
           <Box sx={{ display: { xs: 'flex', md: 'none' }, flexDirection: 'column', gap: 1.5 }}>
             {displayed.map(competitor => {
               const age = calculateAge(competitor.dateOfBirth)
               const dob = formatDOB(competitor.dateOfBirth)
               return (
-                <Paper key={competitor.id} variant="outlined" sx={{ borderRadius: 2, p: 2 }}>
+                <Paper
+                  key={competitor.id}
+                  variant="outlined"
+                  sx={{
+                    borderRadius: 2,
+                    p: 2,
+                    cursor: 'pointer',
+                    transition: 'box-shadow 120ms ease, border-color 120ms ease',
+                    '&:hover': {
+                      boxShadow: 2,
+                      borderColor: 'primary.main',
+                    },
+                    '&:focus-visible': {
+                      outline: '2px solid',
+                      outlineColor: 'primary.main',
+                      outlineOffset: '2px',
+                    },
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedCompetitorID(competitor.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      setSelectedCompetitorID(competitor.id)
+                    }
+                  }}
+                >
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
                     <Box sx={{ minWidth: 0 }}>
                       <Typography variant="subtitle1" fontWeight={600} noWrap>
@@ -551,24 +456,9 @@ export default function CompetitorsPage() {
                       <Typography variant="body1" fontWeight={700}>{competitor.shirtSize || '—'}</Typography>
                     </Box>
                   </Box>
-                  <Box sx={{ mt: 1.5, display: 'flex', gap: 1 }}>
-                    {!isCheckedIn(competitor) && (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => handleCheckInClick(competitor)}
-                        disabled={checkingIn === competitor.id}
-                        fullWidth
-                      >
-                        {checkingIn === competitor.id ? 'Checking in…' : 'Check In'}
-                      </Button>
-                    )}
-                    {isAdmin && (
-                      <IconButton size="small" onClick={() => setEditTarget(competitor)}>
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                    )}
-                  </Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: 'block' }}>
+                    Tap for details and actions
+                  </Typography>
                 </Paper>
               )
             })}
@@ -600,7 +490,6 @@ export default function CompetitorsPage() {
                       ) : col.label}
                     </TableCell>
                   ))}
-                  <TableCell>Action</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -608,7 +497,31 @@ export default function CompetitorsPage() {
                   const age = calculateAge(competitor.dateOfBirth)
                   const dob = formatDOB(competitor.dateOfBirth)
                   return (
-                    <TableRow key={competitor.id} hover>
+                    <TableRow
+                      key={competitor.id}
+                      hover
+                      tabIndex={0}
+                      role="button"
+                      onClick={() => setSelectedCompetitorID(competitor.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          setSelectedCompetitorID(competitor.id)
+                        }
+                      }}
+                      sx={{
+                        cursor: 'pointer',
+                        transition: 'background-color 120ms ease, box-shadow 120ms ease',
+                        '&:hover': {
+                          bgcolor: 'action.selected',
+                        },
+                        '&:focus-visible': {
+                          outline: '2px solid',
+                          outlineColor: 'primary.main',
+                          outlineOffset: '-2px',
+                        },
+                      }}
+                    >
                       {vis('name') && (
                         <TableCell>{competitor.nameFirst} {competitor.nameLast}</TableCell>
                       )}
@@ -616,6 +529,9 @@ export default function CompetitorsPage() {
                         <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
                           {competitor.mostRecentEvent || '—'}
                         </TableCell>
+                      )}
+                      {vis('page') && (
+                        <TableCell>{competitor.pageNumber || '—'}</TableCell>
                       )}
                       {vis('studio') && (
                         <TableCell>{competitor.studio || '—'}</TableCell>
@@ -684,25 +600,6 @@ export default function CompetitorsPage() {
                           ) : <Typography variant="body2" color="text.disabled">—</Typography>}
                         </TableCell>
                       )}
-                      <TableCell>
-                        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                          {!isCheckedIn(competitor) && (
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={() => handleCheckInClick(competitor)}
-                              disabled={checkingIn === competitor.id}
-                            >
-                              {checkingIn === competitor.id ? 'Checking in…' : 'Check In'}
-                            </Button>
-                          )}
-                          {isAdmin && (
-                            <IconButton size="small" onClick={() => setEditTarget(competitor)}>
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                          )}
-                        </Box>
-                      </TableCell>
                     </TableRow>
                   )
                 })}
@@ -711,6 +608,114 @@ export default function CompetitorsPage() {
           </TableContainer>
         </>
       )}
+
+      {/* Column visibility popover */}
+      <Popover
+        open={Boolean(filtersAnchor)}
+        anchorEl={filtersAnchor}
+        onClose={() => setFiltersAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 300, maxWidth: 380, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          <Typography variant="subtitle2">Filters</Typography>
+
+          {/* Hidden until the sentinel resolves to a real event ID — until then
+              there is no honest label for what the table is showing. */}
+          {isAdmin && filterEvent !== EVENT_SCOPE_CURRENT && availableEvents.length > 1 && (
+            <FormControl size="small" fullWidth>
+              <InputLabel>Event</InputLabel>
+              <Select
+                value={filterEvent}
+                label="Event"
+                onChange={e => setFilterEvent(e.target.value)}
+              >
+                <MenuItem value={EVENT_SCOPE_ALL}><em>All</em></MenuItem>
+                {availableEvents.map(e => (
+                  <MenuItem key={e.id} value={e.id}>{e.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
+
+          <FormControl size="small" fullWidth>
+            <InputLabel>Studio</InputLabel>
+            <Select
+              value={filterStudio}
+              label="Studio"
+              onChange={e => setFilterStudio(e.target.value)}
+            >
+              <MenuItem value=""><em>All</em></MenuItem>
+              {uniqueStudios.map(s => (
+                <MenuItem key={s} value={s}>{s}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" fullWidth>
+            <InputLabel>Teacher</InputLabel>
+            <Select
+              value={filterTeacher}
+              label="Teacher"
+              onChange={e => setFilterTeacher(e.target.value)}
+            >
+              <MenuItem value=""><em>All</em></MenuItem>
+              {uniqueTeachers.map(t => (
+                <MenuItem key={t} value={t}>{t}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" fullWidth>
+            <InputLabel>Shirt</InputLabel>
+            <Select
+              value={filterShirt}
+              label="Shirt"
+              onChange={e => setFilterShirt(e.target.value)}
+            >
+              <MenuItem value=""><em>All</em></MenuItem>
+              {uniqueShirts.map(s => (
+                <MenuItem key={s} value={s}>{s}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" fullWidth>
+            <InputLabel>Validated</InputLabel>
+            <Select
+              value={filterValidated}
+              label="Validated"
+              onChange={e => setFilterValidated(e.target.value)}
+            >
+              <MenuItem value=""><em>All</em></MenuItem>
+              <MenuItem value="yes">Validated</MenuItem>
+              <MenuItem value="needs">Needs Validation</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" fullWidth>
+            <InputLabel>Status</InputLabel>
+            <Select
+              value={filterStatus}
+              label="Status"
+              onChange={e => setFilterStatus(e.target.value)}
+            >
+              <MenuItem value=""><em>All</em></MenuItem>
+              <MenuItem value="checkedin">Checked In</MenuItem>
+              <MenuItem value="pending">Pending</MenuItem>
+            </Select>
+          </FormControl>
+
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', pt: 0.5 }}>
+            <Button size="small" onClick={clearFilters} disabled={!anyFilterActive}>
+              Clear
+            </Button>
+            <Button size="small" onClick={() => setFiltersAnchor(null)}>
+              Done
+            </Button>
+          </Box>
+        </Box>
+      </Popover>
 
       {/* Column visibility popover */}
       <Popover
@@ -749,69 +754,16 @@ export default function CompetitorsPage() {
         }}
       />
 
-      <EditCompetitorDialog
-        competitor={editTarget}
-        onClose={() => setEditTarget(null)}
-        onSaved={updated => {
+      <CompetitorDetailDialog
+        open={!!selectedCompetitor}
+        competitor={selectedCompetitor}
+        eventScope={filterEvent}
+        onClose={() => setSelectedCompetitorID(null)}
+        onUpdated={(updated) => {
           const existing = competitors.find(c => c.id === updated.id)
-          updateLocalCompetitor({ ...updated, currentCheckIn: existing?.currentCheckIn })
-          setEditTarget(null)
+          updateLocalCompetitor({ ...updated, currentCheckIn: updated.currentCheckIn ?? existing?.currentCheckIn })
         }}
       />
-
-      <Dialog
-        open={!!validateTarget}
-        onClose={() => !confirming && setValidateTarget(null)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <WarningAmberIcon color="warning" />
-          Validate Before Check-In
-        </DialogTitle>
-        {validateTarget && (
-          <DialogContent>
-            <Typography variant="body1" gutterBottom>
-              <strong>{validateTarget.nameFirst} {validateTarget.nameLast}</strong> requires identity validation.
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
-              <Typography variant="body2" color="text.secondary">
-                Studio: {validateTarget.studio || '—'}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Teacher: {validateTarget.teacher || '—'}
-              </Typography>
-            </Box>
-            <TextField
-              fullWidth
-              label="Date of Birth"
-              type="date"
-              value={editedDOB}
-              onChange={e => setEditedDOB(e.target.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
-              sx={{ mt: 1 }}
-              helperText="Update if the date on file is incorrect."
-            />
-            {dialogError && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {dialogError}
-              </Alert>
-            )}
-          </DialogContent>
-        )}
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setValidateTarget(null)} disabled={confirming}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleConfirm}
-            disabled={confirming || !editedDOB}
-          >
-            {confirming ? 'Saving…' : 'Confirmed — Check In'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   )
 }

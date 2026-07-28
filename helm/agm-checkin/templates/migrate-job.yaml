@@ -1,8 +1,19 @@
 {{/*
-Runs ordered SQL migrations before the API rolls to the new image, so pods never
-serve traffic against a schema they do not expect. Upgrade only — on a fresh
-install there are no tables yet, and the API creates them via AutoMigrate and
-then applies migrations itself at startup.
+Applies ordered SQL migrations from the new image, and fails the upgrade if they
+do not apply — better to stop here than to roll pods against a schema that never
+migrated.
+
+It does NOT gate the rollout. The API pod template is static and the tag never
+changes, so helm upgrade rolls nothing; push-images.fish restarts the deployment
+afterwards. Between this job finishing and that restart, the PREVIOUS release is
+serving against the NEW schema. Migrations must therefore be backwards
+compatible with the release before them — add columns, backfill and add
+constraints freely, but never drop or rename something the running code still
+touches. Dropping is a separate, later deploy once no live pod references it.
+
+Upgrade only. On a fresh install there are no tables yet, so the API builds them
+via AutoMigrate and applies migrations itself at startup; a hook here would race
+postgres coming up for the first time.
 */}}
 apiVersion: batch/v1
 kind: Job
@@ -18,6 +29,11 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 2
+  # Migrate() takes a session-level advisory lock with no context deadline, so if
+  # another process is holding it (a wedged API pod mid-startup, a long-running
+  # transaction) this job waits forever and blocks the upgrade with it. Bound it
+  # so a stuck lock surfaces as a failed job with readable logs instead of a hang.
+  activeDeadlineSeconds: {{ .Values.migrate.timeoutSeconds }}
   template:
     metadata:
       labels:
@@ -30,5 +46,4 @@ spec:
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           command: ["/app/migrate"]
           env:
-            - name: DATABASE_URL
-              value: "host={{ .Release.Name }}-postgres user={{ .Values.postgres.user }} password={{ .Values.postgres.password }} dbname={{ .Values.postgres.db }} port=5432 sslmode=disable"
+            {{- include "agm-checkin.databaseUrlEnv" . | nindent 12 }}

@@ -1,0 +1,58 @@
+{{- if .Values.dbBackup.enabled }}
+{{- $prefix := include "agm-checkin.dbBackupPrefix" . }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-db-backup
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+    app: agm-db-backup
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    # Leave failed jobs for debugging, prune successful runs.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: {{ .Values.dbBackup.timeoutSeconds }}
+  template:
+    metadata:
+      labels:
+        app: agm-db-backup
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: db-backup
+          image: {{ .Values.postgres.image }}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-ec"]
+          args:
+            - |
+              ts="$(date -u +%Y%m%dT%H%M%SZ)"
+              out="/backups/{{ $prefix }}_r{{ .Release.Revision }}_${ts}.sql.gz"
+              echo "Creating pre-upgrade backup: ${out}"
+              PGPASSWORD="$POSTGRES_PASSWORD" \
+                pg_dump \
+                -h "{{ .Release.Name }}-postgres" \
+                -U "$POSTGRES_USER" \
+                --no-owner \
+                --no-privileges \
+                "$POSTGRES_DB" | gzip > "$out"
+
+              # Keep only the newest N backup files for this prefix.
+              ls -1t "/backups/{{ $prefix }}_"*.sql.gz 2>/dev/null | tail -n +{{ add .Values.dbBackup.retention 1 }} | xargs -r rm -f
+              echo "Pre-upgrade backup complete."
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            {{- include "agm-checkin.postgresPasswordEnv" . | nindent 12 }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.db | quote }}
+          volumeMounts:
+            - name: db-backups
+              mountPath: /backups
+      volumes:
+        - name: db-backups
+          persistentVolumeClaim:
+            claimName: {{ include "agm-checkin.dbBackupPvcName" . }}
+{{- end }}

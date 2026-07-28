@@ -19,10 +19,33 @@ var migrationFS embed.FS
 // The API deploys with replicaCount 2, so without it concurrent runs could race.
 const migrationLockKey = 8724531
 
+// Setup brings a database fully up to date: AutoMigrate first, so the tables the
+// models describe exist, then the ordered SQL migrations. Both run under one
+// advisory lock, which is the point of the function — AutoMigrate is not safe to
+// run concurrently, and the API deploys with replicaCount 2, so two pods starting
+// together would otherwise race on CREATE TABLE and leave a half-built schema.
+// This is what application entrypoints should call.
+func Setup(database *gorm.DB) error {
+	return withMigrationLock(database, func(ctx context.Context, conn *sql.Conn) error {
+		if err := autoMigrate(database); err != nil {
+			return fmt.Errorf("automigrate: %w", err)
+		}
+		return applyMigrations(ctx, conn)
+	})
+}
+
 // Migrate applies every migration under migrations/ that has not yet run, in
 // filename order, recording each in schema_migrations. It is safe to call
-// repeatedly and safe to call concurrently.
+// repeatedly and safe to call concurrently. It does not run AutoMigrate — the
+// pre-upgrade job uses this, where the tables already exist.
 func Migrate(database *gorm.DB) error {
+	return withMigrationLock(database, applyMigrations)
+}
+
+// withMigrationLock pins a single connection, holds the advisory lock on it for
+// the duration of fn, and releases it afterwards. The lock is session scoped, so
+// it has to stay on one connection rather than being scattered across the pool.
+func withMigrationLock(database *gorm.DB, fn func(context.Context, *sql.Conn) error) error {
 	sqlDB, err := database.DB()
 	if err != nil {
 		return fmt.Errorf("getting sql handle: %w", err)
@@ -30,8 +53,6 @@ func Migrate(database *gorm.DB) error {
 
 	ctx := context.Background()
 
-	// Pin one connection so the session-level advisory lock is held for the
-	// whole run rather than being scattered across the pool.
 	conn, err := sqlDB.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("acquiring connection: %w", err)
@@ -47,6 +68,12 @@ func Migrate(database *gorm.DB) error {
 		}
 	}()
 
+	return fn(ctx, conn)
+}
+
+// applyMigrations runs the pending migrations. The caller must already hold the
+// migration lock.
+func applyMigrations(ctx context.Context, conn *sql.Conn) error {
 	if _, err := conn.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version    text PRIMARY KEY,

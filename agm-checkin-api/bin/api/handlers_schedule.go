@@ -45,6 +45,7 @@ func createScheduleEntry(scheduleSvc *service.ScheduleService, audit *service.Au
 			Room         string    `json:"room"`
 			Category     string    `json:"category"`
 			Division     string    `json:"division"`
+			PageNumber   string    `json:"pageNumber"`
 			SortOrder    int       `json:"sortOrder"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -64,6 +65,7 @@ func createScheduleEntry(scheduleSvc *service.ScheduleService, audit *service.Au
 			Room:         body.Room,
 			Category:     body.Category,
 			Division:     body.Division,
+			PageNumber:   body.PageNumber,
 			SortOrder:    body.SortOrder,
 		}
 		if err := scheduleSvc.Create(&entry); err != nil {
@@ -95,6 +97,7 @@ func updateScheduleEntry(scheduleSvc *service.ScheduleService, audit *service.Au
 			Room         string    `json:"room"`
 			Category     string    `json:"category"`
 			Division     string    `json:"division"`
+			PageNumber   string    `json:"pageNumber"`
 			SortOrder    int       `json:"sortOrder"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -108,6 +111,7 @@ func updateScheduleEntry(scheduleSvc *service.ScheduleService, audit *service.Au
 			Room:         body.Room,
 			Category:     body.Category,
 			Division:     body.Division,
+			PageNumber:   body.PageNumber,
 			SortOrder:    body.SortOrder,
 		})
 		if err != nil {
@@ -170,6 +174,7 @@ func bulkImportSchedule(scheduleSvc *service.ScheduleService, audit *service.Aud
 				Room         string    `json:"room"`
 				Category     string    `json:"category"`
 				Division     string    `json:"division"`
+				PageNumber   string    `json:"pageNumber"`
 				SortOrder    int       `json:"sortOrder"`
 			} `json:"entries"`
 		}
@@ -190,6 +195,7 @@ func bulkImportSchedule(scheduleSvc *service.ScheduleService, audit *service.Aud
 				Room:         e.Room,
 				Category:     e.Category,
 				Division:     e.Division,
+				PageNumber:   e.PageNumber,
 				SortOrder:    e.SortOrder,
 			}
 		}

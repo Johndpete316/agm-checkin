@@ -1,0 +1,70 @@
+{{- if .Values.dbRestore.enabled }}
+{{- $backupFile := required "dbRestore.backupFile must be set when dbRestore.enabled=true" .Values.dbRestore.backupFile }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-db-restore-r{{ .Release.Revision }}
+  labels:
+    {{- include "agm-checkin.labels" . | nindent 4 }}
+    app: agm-db-restore
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.dbRestore.timeoutSeconds }}
+  template:
+    metadata:
+      labels:
+        app: agm-db-restore
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: db-restore
+          image: {{ .Values.postgres.image }}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-ec"]
+          args:
+            - |
+              file="/backups/{{ $backupFile }}"
+              if [ ! -f "$file" ]; then
+                echo "Backup file not found: $file"
+                exit 1
+              fi
+
+              echo "Restoring DB from $file"
+              PGPASSWORD="$POSTGRES_PASSWORD" \
+                psql -h "{{ .Release.Name }}-postgres" -U "$POSTGRES_USER" -d postgres -c \
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$POSTGRES_DB' AND pid <> pg_backend_pid();"
+
+              PGPASSWORD="$POSTGRES_PASSWORD" \
+                psql -h "{{ .Release.Name }}-postgres" -U "$POSTGRES_USER" -d postgres -c \
+                "DROP DATABASE IF EXISTS \"$POSTGRES_DB\";"
+
+              PGPASSWORD="$POSTGRES_PASSWORD" \
+                psql -h "{{ .Release.Name }}-postgres" -U "$POSTGRES_USER" -d postgres -c \
+                "CREATE DATABASE \"$POSTGRES_DB\";"
+
+              case "$file" in
+                *.gz)
+                  gzip -dc "$file" | PGPASSWORD="$POSTGRES_PASSWORD" \
+                    psql -h "{{ .Release.Name }}-postgres" -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+                  ;;
+                *)
+                  cat "$file" | PGPASSWORD="$POSTGRES_PASSWORD" \
+                    psql -h "{{ .Release.Name }}-postgres" -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+                  ;;
+              esac
+
+              echo "DB restore complete."
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            {{- include "agm-checkin.postgresPasswordEnv" . | nindent 12 }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.db | quote }}
+          volumeMounts:
+            - name: db-backups
+              mountPath: /backups
+      volumes:
+        - name: db-backups
+          persistentVolumeClaim:
+            claimName: {{ include "agm-checkin.dbBackupPvcName" . }}
+{{- end }}

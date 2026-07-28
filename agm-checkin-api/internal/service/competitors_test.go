@@ -34,9 +34,8 @@ func newFixture(t *testing.T) (*gorm.DB, *CompetitorService) {
 		t.Fatalf("connecting to test database: %v", err)
 	}
 
-	db.AutoMigrate(database)
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("running migrations: %v", err)
+	if err := db.Setup(database); err != nil {
+		t.Fatalf("database setup: %v", err)
 	}
 
 	if err := database.Exec(
@@ -440,10 +439,11 @@ func TestDeleteCascadesToAttendance(t *testing.T) {
 	}
 }
 
-// Migration 003 drops these, but AutoMigrate runs first and happily re-creates a
-// column for any struct field that comes back — and it would not re-run the
-// migration to undo that. This test is the guard against a legacy field being
-// reintroduced by accident.
+// These columns were dropped in production by the old migration 003 and are
+// never created on a fresh database, since no struct field maps to them. Nothing
+// drops them any more, so the only thing keeping them gone is that absence:
+// AutoMigrate happily re-creates a column for any struct field that comes back.
+// This test is the guard against a legacy field being reintroduced by accident.
 func TestLegacyColumnsAreGone(t *testing.T) {
 	database, _ := newFixture(t)
 

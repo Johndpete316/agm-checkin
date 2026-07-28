@@ -25,8 +25,7 @@ spec:
           env:
             - name: POSTGRES_USER
               value: {{ .Values.postgres.user | quote }}
-            - name: POSTGRES_PASSWORD
-              value: {{ .Values.postgres.password | quote }}
+            {{- include "agm-checkin.postgresPasswordEnv" . | nindent 12 }}
             - name: POSTGRES_DB
               value: {{ .Values.postgres.db | quote }}
             - name: PGDATA

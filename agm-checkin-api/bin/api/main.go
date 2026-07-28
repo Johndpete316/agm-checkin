@@ -46,10 +46,8 @@ func main() {
 	}
 
 	database := db.Connect(dsn)
-	db.AutoMigrate(database)
-
-	if err := db.Migrate(database); err != nil {
-		log.Fatalf("migrations failed: %v", err)
+	if err := db.Setup(database); err != nil {
+		log.Fatalf("database setup failed: %v", err)
 	}
 
 	competitorSvc := service.NewCompetitorService(database)

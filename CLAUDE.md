@@ -61,7 +61,9 @@ VALUES ('glr-2026', 'GLR 2026', '2026-03-14', '2026-03-16', true);
 | `bin/api/main.go` | Router, all HTTP handlers, server entrypoint |
 | `bin/seed/seed.go` | Seeds 100 realistic competitors for local development |
 | `bin/import/main.go` | CSV normalization script: reads 4 raw historical CSVs, outputs one normalized CSV to stdout |
-| `internal/db/db.go` | GORM models (`Competitor`, `Event`, `CompetitorEvent`, `AuditLog`), `Connect()`, `AutoMigrate()` |
+| `internal/db/db.go` | GORM models (`Competitor`, `Event`, `CompetitorEvent`, `AuditLog`), `Connect()` |
+| `internal/db/migrate.go` | `Setup()` (AutoMigrate + migrations, under one advisory lock — what entrypoints call), `Migrate()` (migrations only, used by the pre-upgrade job) |
+| `internal/db/migrations/*.sql` | Ordered SQL migrations, embedded in the binary and recorded in `schema_migrations` |
 | `internal/db/auth.go` | Auth models: `IPBlocklist`, `PINAttempt`, `StaffToken` |
 | `internal/service/competitors.go` | `CompetitorService` — all competitor business logic |
 | `internal/service/events.go` | `EventService` — event CRUD and current-event management |
@@ -272,22 +274,36 @@ Staff corrects the DOB if needed, then confirms. This fires:
 
 If `Competitor` fields change in the backend:
 - Update the Go struct in `internal/db/db.go`
-- `AutoMigrate` handles schema changes on next startup (adds columns, does not drop them)
+- `Setup()` runs AutoMigrate on next startup, which adds columns but never drops or retypes them. A new `not null` column needs a `default:` tag, or Postgres rejects the `ALTER` on a table that already has rows
+- Anything AutoMigrate cannot express — foreign keys, partial indexes, type changes, backfills — needs a numbered file in `internal/db/migrations/`
 - On the frontend, `src/api/competitors.js` is the single file to update for field references
 - Component field references (`nameFirst`, `nameLast`, etc.) are intentional — update those where used
 
 ---
 
 ## Deployment
-asdf
+
 **Full deploy** (build images + push to nodes + helm upgrade + rolling restart):
-```fishasasdf
+```fish
 cd scripts && ./push-images.fish
 ```
+
+The `helm upgrade` runs `templates/migrate-job.yaml` as a `pre-upgrade` hook, then
+`push-images.fish` restarts the deployment. The API pod template never changes, so
+helm itself rolls nothing — which means the **previous** release serves against the
+**new** schema until that restart lands. Migrations must be backwards compatible
+with the release before them: add columns, backfill, add constraints; drop only in
+a later deploy, once no running pod references the column.
 
 **Database restore** (wipes production DB and restores from a local dump):
 ```fish
 cd scripts && ./restore-db.fish ../path/to/dump.sql
+```
+
+**Rotate the postgres password** (ALTER USER + secrets file + redeploy, in the one
+order that works — see the header comment for why):
+```fish
+cd scripts && ./rotate-db-password.fish --generate
 ```
 
 **Secrets file** (`helm/agm-checkin/values.secret.yaml`, gitignored):
