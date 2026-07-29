@@ -34,6 +34,28 @@ func getCompetitorSchedule(scheduleSvc *service.ScheduleService, eventSvc *servi
 	}
 }
 
+// listEventSchedule serves the whole schedule for one event, defaulting to the
+// current event when no eventId is supplied.
+func listEventSchedule(scheduleSvc *service.ScheduleService, eventSvc *service.EventService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		eventID := r.URL.Query().Get("eventId")
+		if eventID == "" {
+			current, err := eventSvc.GetCurrent()
+			if err != nil || current == nil {
+				respondJSON(w, http.StatusOK, []service.EventScheduleEntry{})
+				return
+			}
+			eventID = current.ID
+		}
+		entries, err := scheduleSvc.GetByEvent(eventID)
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusOK, entries)
+	}
+}
+
 func createScheduleEntry(scheduleSvc *service.ScheduleService, audit *service.AuditService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		competitorID := chi.URLParam(r, "id")

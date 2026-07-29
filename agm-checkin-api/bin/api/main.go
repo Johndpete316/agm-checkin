@@ -105,6 +105,7 @@ func main() {
 		r.Delete("/api/competitors/{id}", deleteCompetitor(competitorSvc, auditSvc))
 		r.Get("/api/competitors/{id}/events", getCompetitorEvents(competitorSvc))
 		r.Get("/api/competitors/{id}/schedule", getCompetitorSchedule(scheduleSvc, eventSvc))
+		r.Get("/api/schedule", listEventSchedule(scheduleSvc, eventSvc))
 
 		r.Get("/api/events", listEvents(eventSvc))
 		r.Get("/api/events/current", getCurrentEvent(eventSvc))

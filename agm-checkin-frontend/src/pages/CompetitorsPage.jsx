@@ -468,15 +468,10 @@ export default function CompetitorsPage() {
           <TableContainer component={Paper} sx={{ borderRadius: 2, display: { xs: 'none', md: 'block' } }}>
             <Table
               size="small"
-              sx={{
-                '& td, & th': { fontSize: '0.78rem', px: 1.25, py: 0.6 },
-                '& tbody tr:nth-of-type(even)': {
-                  bgcolor: 'action.hover',
-                },
-              }}
+              sx={{ '& td': { fontSize: '0.8rem' } }}
             >
               <TableHead>
-                <TableRow sx={{ '& th': { fontWeight: 600 } }}>
+                <TableRow>
                   {COLUMNS.map(col => vis(col.key) && (
                     <TableCell key={col.key}>
                       {col.sort ? (
@@ -511,10 +506,6 @@ export default function CompetitorsPage() {
                       }}
                       sx={{
                         cursor: 'pointer',
-                        transition: 'background-color 120ms ease, box-shadow 120ms ease',
-                        '&:hover': {
-                          bgcolor: 'action.selected',
-                        },
                         '&:focus-visible': {
                           outline: '2px solid',
                           outlineColor: 'primary.main',

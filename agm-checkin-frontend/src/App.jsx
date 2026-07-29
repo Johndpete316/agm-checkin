@@ -6,6 +6,7 @@ import Box from '@mui/material/Box'
 import NavBar from './components/NavBar'
 import CheckInPage from './pages/CheckInPage'
 import CompetitorsPage from './pages/CompetitorsPage'
+import SchedulePage from './pages/SchedulePage'
 import StatsPage from './pages/StatsPage'
 import LoginPage from './pages/LoginPage'
 import ManageUsersPage from './pages/ManageUsersPage'
@@ -52,6 +53,7 @@ function AppLayout() {
           <Route path="/" element={<Navigate to="/home" replace />} />
           <Route path="/home" element={<ProtectedRoute><CheckInPage /></ProtectedRoute>} />
           <Route path="/competitors" element={<ProtectedRoute><CompetitorsPage /></ProtectedRoute>} />
+          <Route path="/schedule" element={<ProtectedRoute><SchedulePage /></ProtectedRoute>} />
           <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
           <Route path="/events" element={<AdminRoute><EventsPage /></AdminRoute>} />
           <Route path="/audit" element={<AdminRoute><AuditPage /></AdminRoute>} />

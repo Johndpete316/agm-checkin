@@ -23,6 +23,7 @@ import logo from '../assets/agm-125th-logo.png'
 const baseNavLinks = [
   { label: 'Check In', path: '/home' },
   { label: 'Competitors', path: '/competitors' },
+  { label: 'Schedule', path: '/schedule' },
   { label: 'Stats', path: '/stats' },
 ]
 

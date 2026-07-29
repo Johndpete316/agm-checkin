@@ -276,26 +276,24 @@ export default function CompetitorCard({ competitor, onCheckIn, onUpdate, loadin
                 Schedule
               </Typography>
               <Box sx={{ overflowX: 'auto', mt: 0.5 }}>
-                <Table size="small" sx={{ minWidth: 400 }}>
+                <Table size="small" sx={{ minWidth: 400, '& td': { fontSize: '0.78rem' } }}>
                   <TableHead>
                     <TableRow>
                       {['Day', 'Time', 'Page', 'Room', 'Instrument', 'Category', 'Division'].map(h => (
-                        <TableCell key={h} sx={{ fontSize: '0.7rem', fontWeight: 600, py: 0.5, px: 1, color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                          {h}
-                        </TableCell>
+                        <TableCell key={h} sx={{ color: 'text.secondary' }}>{h}</TableCell>
                       ))}
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {schedule.map(entry => (
-                      <TableRow key={entry.id} sx={{ '&:last-child td': { border: 0 } }}>
-                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1, whiteSpace: 'nowrap' }}>{formatScheduleDate(entry.scheduleDate)}</TableCell>
-                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1, whiteSpace: 'nowrap' }}>{entry.scheduleTime}</TableCell>
-                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1, whiteSpace: 'nowrap' }}>{entry.pageNumber || '—'}</TableCell>
-                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1, whiteSpace: 'nowrap' }}>{entry.room || '—'}</TableCell>
-                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1 }}>{entry.instrument}</TableCell>
-                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1 }}>{entry.category}</TableCell>
-                        <TableCell sx={{ fontSize: '0.75rem', py: 0.5, px: 1 }}>{entry.division}</TableCell>
+                      <TableRow key={entry.id} hover sx={{ '&:last-child td': { border: 0 } }}>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatScheduleDate(entry.scheduleDate)}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{entry.scheduleTime}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{entry.pageNumber || '—'}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{entry.room || '—'}</TableCell>
+                        <TableCell>{entry.instrument}</TableCell>
+                        <TableCell>{entry.category}</TableCell>
+                        <TableCell>{entry.division}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
