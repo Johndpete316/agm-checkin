@@ -11,10 +11,16 @@ import ListItem from '@mui/material/ListItem'
 import ListItemButton from '@mui/material/ListItemButton'
 import ListItemText from '@mui/material/ListItemText'
 import Divider from '@mui/material/Divider'
+import Menu from '@mui/material/Menu'
+import MenuItem from '@mui/material/MenuItem'
+import Collapse from '@mui/material/Collapse'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import LogoutIcon from '@mui/icons-material/Logout'
 import MenuIcon from '@mui/icons-material/Menu'
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useColorMode } from '../App'
 import { useAuth } from '../context/AuthContext'
@@ -27,13 +33,17 @@ const baseNavLinks = [
   { label: 'Stats', path: '/stats' },
 ]
 
-const adminNavLinks = [
-  ...baseNavLinks,
-  { label: 'Events', path: '/events' },
-  { label: 'Manage Users', path: '/manage-users' },
-  { label: 'Audit Log', path: '/audit' },
-  { label: 'Import Data', path: '/import' },
-]
+// Every admin-only destination lives behind one nav entry, so the bar itself is
+// the same four links for everyone. Add to this list to extend the group.
+const adminGroup = {
+  label: 'Admin',
+  links: [
+    { label: 'Events', path: '/events' },
+    { label: 'Manage Users', path: '/manage-users' },
+    { label: 'Import Data', path: '/import' },
+    { label: 'Audit Log', path: '/audit' },
+  ],
+}
 
 export default function NavBar() {
   const location = useLocation()
@@ -41,8 +51,14 @@ export default function NavBar() {
   const { mode, toggle } = useColorMode()
   const { staff, isAdmin, logout } = useAuth()
 
-  const navLinks = isAdmin ? adminNavLinks : baseNavLinks
+  const navLinks = baseNavLinks
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [adminAnchor, setAdminAnchor] = useState(null)
+
+  const inAdminGroup = adminGroup.links.some(link => link.path === location.pathname)
+  // The drawer group starts open when you are already inside it, so the current
+  // page is never hidden behind a collapsed section.
+  const [adminExpanded, setAdminExpanded] = useState(inAdminGroup)
 
   function handleLogout() {
     logout()
@@ -75,6 +91,34 @@ export default function NavBar() {
             </ListItemButton>
           </ListItem>
         ))}
+
+        {isAdmin && (
+          <>
+            <ListItem disablePadding>
+              <ListItemButton onClick={() => setAdminExpanded(open => !open)}>
+                <ListItemText primary={adminGroup.label} />
+                {adminExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+              </ListItemButton>
+            </ListItem>
+            <Collapse in={adminExpanded} unmountOnExit>
+              <List disablePadding>
+                {adminGroup.links.map(link => (
+                  <ListItem key={link.path} disablePadding>
+                    <ListItemButton
+                      component={Link}
+                      to={link.path}
+                      selected={location.pathname === link.path}
+                      onClick={() => setDrawerOpen(false)}
+                      sx={{ pl: 4 }}
+                    >
+                      <ListItemText primary={link.label} primaryTypographyProps={{ variant: 'body2' }} />
+                    </ListItemButton>
+                  </ListItem>
+                ))}
+              </List>
+            </Collapse>
+          </>
+        )}
       </List>
       <Divider />
       <List disablePadding>
@@ -127,6 +171,45 @@ export default function NavBar() {
                 {link.label}
               </Button>
             ))}
+
+            {isAdmin && (
+              <>
+                <Button
+                  color="inherit"
+                  onClick={e => setAdminAnchor(e.currentTarget)}
+                  endIcon={<ArrowDropDownIcon />}
+                  aria-haspopup="menu"
+                  aria-expanded={Boolean(adminAnchor)}
+                  sx={{
+                    fontWeight: inAdminGroup ? 700 : 400,
+                    borderBottom: inAdminGroup ? '2px solid white' : '2px solid transparent',
+                    borderRadius: 0,
+                  }}
+                >
+                  {adminGroup.label}
+                </Button>
+                <Menu
+                  anchorEl={adminAnchor}
+                  open={Boolean(adminAnchor)}
+                  onClose={() => setAdminAnchor(null)}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                >
+                  {adminGroup.links.map(link => (
+                    <MenuItem
+                      key={link.path}
+                      component={Link}
+                      to={link.path}
+                      selected={location.pathname === link.path}
+                      onClick={() => setAdminAnchor(null)}
+                    >
+                      {link.label}
+                    </MenuItem>
+                  ))}
+                </Menu>
+              </>
+            )}
+
             <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: 'rgba(255,255,255,0.3)' }} />
             {staff && (
               <Typography variant="body2" sx={{ opacity: 0.85 }}>
