@@ -5,11 +5,13 @@ services:
     restart: always
     shm_size: 128mb
     ports:
-      - 5432:5432
+      - 5430:5432
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: test
       POSTGRES_DB: agm_db
+    volumes:
+      - ./agm_db.sql:/docker-entrypoint-initdb.d/agm_db.sql
 
   pgadmin4:
     image: dpage/pgadmin4:latest
